@@ -26,30 +26,32 @@ def signup(signup_msg, db):
 
 
 def handle_thread(client_socket, client_address, my_index):
+    cont_connection = True
     db = DBConnection()
     first_msg = flashpoint_protocol.get_proto_msg(client_socket)
     while flashpoint_protocol.get_func(first_msg) not in FIRST_FUNCS:
         first_msg = flashpoint_protocol.get_proto_msg(client_socket)
     func = flashpoint_protocol.get_func(first_msg)
-    if func == 'LI':
-        while not login(first_msg, db) and flashpoint_protocol.get_func(first_msg) == 'LI':
-            msg = flashpoint_protocol.create_proto_msg('VU', flashpoint_protocol.create_proto_data('False'))
-            client_socket.send(msg.encode())
-            first_msg = flashpoint_protocol.get_proto_msg(client_socket)
+    while cont_connection:
+        if func == 'LI':
+            while not login(first_msg, db) and flashpoint_protocol.get_func(first_msg) == 'LI':
+                msg = flashpoint_protocol.create_proto_msg('VU', flashpoint_protocol.create_proto_data('False'))
+                client_socket.send(msg.encode())
+                first_msg = flashpoint_protocol.get_proto_msg(client_socket)
 
-        if flashpoint_protocol.get_func(first_msg) != 'LI':
-            msg = flashpoint_protocol.error_msg()
-            client_socket.send(msg.encode())
+            if flashpoint_protocol.get_func(first_msg) != 'LI':
+                msg = flashpoint_protocol.error_msg()
+                client_socket.send(msg.encode())
 
-        else:
-            msg = flashpoint_protocol.create_proto_msg('VU', flashpoint_protocol.create_proto_data('True'))
-            client_socket.send(msg.encode())
+            else:
+                msg = flashpoint_protocol.create_proto_msg('VU', flashpoint_protocol.create_proto_data('True'))
+                client_socket.send(msg.encode())
 
-    if func == 'SU':
-        while not signup(first_msg, db) and flashpoint_protocol.get_func(first_msg) == 'SU':
-            msg = flashpoint_protocol.create_proto_msg('IE', flashpoint_protocol.create_proto_data('True'))
-            client_socket.send(msg.encode())
-            first_msg = flashpoint_protocol.get_proto_msg(client_socket)
+        if func == 'SU':
+            while not signup(first_msg, db) and flashpoint_protocol.get_func(first_msg) == 'SU':
+                msg = flashpoint_protocol.create_proto_msg('IE', flashpoint_protocol.create_proto_data('True'))
+                client_socket.send(msg.encode())
+                first_msg = flashpoint_protocol.get_proto_msg(client_socket)
 
             if flashpoint_protocol.get_func(first_msg) != 'SU':
                 msg = flashpoint_protocol.error_msg()
