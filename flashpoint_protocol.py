@@ -1,3 +1,6 @@
+LEGAL_FUNCS = ['']
+
+
 def get_func(proto_msg):
     return proto_msg.split('@')[0]
 
@@ -49,7 +52,6 @@ def get_chunk_msg(client_socket):
 
     full_msg += msg_len
     full_msg += curr_char
-    count = 0
     for i in range(int(msg_len)):
         full_msg += client_socket.recv(1)
     return full_msg
