@@ -1,17 +1,19 @@
 LEGAL_FUNCS = ['']
 
 
-def get_func(proto_msg):
-    return proto_msg.split('@')[0]
-
-
 def get_msg_len(proto_msg):
-    len_str = proto_msg.split('@')[1]
-    len_str = len_str.split('|')[0]
-    return int(len_str)
+    return int(proto_msg.split('@')[0])
+
+
+def get_func(proto_msg):
+    func_str = proto_msg.split('@')[1]
+    func_str = func_str.split('|')[0]
+    return func_str
 
 
 def get_data(proto_msg, half_num=1):
+    if half_num < 1 or half_num > 2:
+        half_num = 1
     return proto_msg.split('|')[1].split('^')[half_num - 1]
 
 
@@ -28,14 +30,13 @@ def get_chunk(chunk_msg):
 
 
 def get_proto_msg(client_socket):
-    full_msg = client_socket.recv(3).decode()
-    msg_len = ''
     curr_char = client_socket.recv(1).decode()
-    while curr_char != '|':
+    msg_len = ''
+    while curr_char != '@':
         msg_len += curr_char
         curr_char = client_socket.recv(1).decode()
 
-    full_msg += msg_len
+    full_msg = msg_len
     full_msg += curr_char
     for i in range(int(msg_len)):
         full_msg += client_socket.recv(1).decode()
@@ -43,14 +44,13 @@ def get_proto_msg(client_socket):
 
 
 def get_chunk_msg(client_socket):
-    full_msg = client_socket.recv(3)
-    msg_len = b''
     curr_char = client_socket.recv(1)
-    while curr_char != b'|':
+    msg_len = b''
+    while curr_char != b'@':
         msg_len += curr_char
         curr_char = client_socket.recv(1)
 
-    full_msg += msg_len
+    full_msg = msg_len
     full_msg += curr_char
     for i in range(int(msg_len)):
         full_msg += client_socket.recv(1)
@@ -58,7 +58,8 @@ def get_chunk_msg(client_socket):
 
 
 def error_msg():
-    return 'ER@0|^'
+    ret_str = 'ER|^'
+    return str(len(ret_str)) + '@' + ret_str
 
 
 def create_proto_msg(func, data):
@@ -70,7 +71,8 @@ def create_proto_msg(func, data):
     :type data: str
     :return:
     """
-    msg = func + '@' + str(len(data)) + '|' + data
+    msg_str = func + '|' + data
+    msg = str(len(msg_str)) + '@' + msg_str
     return msg
 
 
@@ -85,5 +87,6 @@ def create_chunk_data(chunk_num, chunk):
 
 
 def create_chunk_msg(data):
-    msg = b'MC@' + str(len(data)).encode() + b'|' + data
+    msg_bytes = b'MC|' + data
+    msg = str(len(msg_bytes)).encode() + b'@' + msg_bytes
     return msg
