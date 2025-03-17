@@ -29,9 +29,11 @@ def handle_thread(client_socket, client_address, my_index):
     cont_connection = True
     db = DBConnection()
     first_msg = flashpoint_protocol.get_proto_msg(client_socket)
+    print(first_msg)
     while flashpoint_protocol.get_func(first_msg) not in FIRST_FUNCS:
         first_msg = flashpoint_protocol.get_proto_msg(client_socket)
     func = flashpoint_protocol.get_func(first_msg)
+    print(func)
     while cont_connection:
         if func == 'LI':
             while not login(first_msg, db) and flashpoint_protocol.get_func(first_msg) == 'LI':
@@ -51,6 +53,7 @@ def handle_thread(client_socket, client_address, my_index):
             while not signup(first_msg, db) and flashpoint_protocol.get_func(first_msg) == 'SU':
                 msg = flashpoint_protocol.create_proto_msg('IE', flashpoint_protocol.create_proto_data('True'))
                 client_socket.send(msg.encode())
+                print(msg)
                 first_msg = flashpoint_protocol.get_proto_msg(client_socket)
 
             if flashpoint_protocol.get_func(first_msg) != 'SU':
@@ -60,6 +63,27 @@ def handle_thread(client_socket, client_address, my_index):
             else:
                 msg = flashpoint_protocol.create_proto_msg('IE', flashpoint_protocol.create_proto_data('False'))
                 client_socket.send(msg.encode())
+
+        if func == 'GM':
+            ret_data = ''
+            username = flashpoint_protocol.get_data(first_msg, 1)
+            password = flashpoint_protocol.get_data(first_msg, 2)
+            if login(first_msg, db):
+                print('logged in')
+                movie_str = db.get_movie_lst(username, password)
+                print(movie_str)
+                frame_str = db.get_frame_lst(username, password)
+                print(frame_str)
+                msg = flashpoint_protocol.create_proto_msg('YM',
+                                                           flashpoint_protocol.create_proto_data(movie_str,frame_str))
+                print(msg)
+                client_socket.send(msg.encode())
+
+        print('#')
+        first_msg = flashpoint_protocol.get_proto_msg(client_socket)
+        func = flashpoint_protocol.get_func(first_msg)
+        print(first_msg)
+        print(func)
 
 
 def main():
