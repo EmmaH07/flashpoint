@@ -2,7 +2,7 @@ import socket
 from threading import Thread
 import flashpoint_protocol
 from db_connector import DBConnection
-import os
+import pickle
 
 FIRST_FUNCS = ['SU', 'LI']
 IP = '0.0.0.0'
@@ -23,6 +23,11 @@ def signup(signup_msg, db):
     if not ret_ans:
         db.add_user(username, password)
     return not ret_ans
+
+
+def get_movie_lst(user_id, db):
+    movie_lst = db.get_movie_lst(user_id)
+    return movie_lst
 
 
 def handle_thread(client_socket, client_address, my_index):
@@ -65,19 +70,32 @@ def handle_thread(client_socket, client_address, my_index):
                 client_socket.send(msg.encode())
 
         if func == 'GM':
-            ret_data = ''
-            username = flashpoint_protocol.get_data(first_msg, 1)
-            password = flashpoint_protocol.get_data(first_msg, 2)
-            if login(first_msg, db):
+            ret_data = []
+            user_id = db.get_user_id(flashpoint_protocol.get_data(first_msg, 1),
+                                     flashpoint_protocol.get_data(first_msg, 2))
+            if user_id:
                 print('logged in')
-                movie_str = db.get_movie_lst(username, password)
-                print(movie_str)
-                frame_str = db.get_frame_lst(username, password)
-                print(frame_str)
-                msg = flashpoint_protocol.create_proto_msg('YM',
-                                                           flashpoint_protocol.create_proto_data(movie_str,frame_str))
-                print(msg)
-                client_socket.send(msg.encode())
+                ret_data = get_movie_lst(user_id, db)
+                ret_data = pickle.dumps(ret_data)
+                msg = flashpoint_protocol.create_byte_msg('YM', flashpoint_protocol.create_byte_data(ret_data))
+                client_socket.send(msg)
+
+            else:
+                client_socket.send(flashpoint_protocol.error_msg().encode())
+
+        if func == 'GP':
+            movie_name = flashpoint_protocol.get_data(first_msg)
+            poster_fpath = db.get_poster_fpath(movie_name)
+            print('poster fpath: ')
+            print(poster_fpath)
+            msg = flashpoint_protocol.create_proto_msg('MP', flashpoint_protocol.create_proto_data(poster_fpath))
+            client_socket.send(msg.encode())
+
+        if func == 'AP':
+            posters = db.get_all_posters()
+            posters = pickle.dumps(posters)
+            msg = flashpoint_protocol.create_byte_msg('PL', flashpoint_protocol.create_byte_data(posters))
+            client_socket.send(msg)
 
         print('#')
         first_msg = flashpoint_protocol.get_proto_msg(client_socket)
