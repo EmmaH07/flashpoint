@@ -13,8 +13,8 @@ def get_chunks(my_socket, movie_len):
     ffplay = subprocess.Popen(["ffplay", "-"], stdin=subprocess.PIPE)
     play = False
     for i in range(movie_len):
-        chunk_msg = flashpoint_protocol.get_chunk_msg(my_socket)
-        m_chunk = flashpoint_protocol.get_chunk(chunk_msg)
+        chunk_msg = flashpoint_protocol.get_byte_msg(my_socket)
+        m_chunk = flashpoint_protocol.get_bytes_data(chunk_msg, 2)
         print(m_chunk)
         q.put(m_chunk)
         if q.qsize() > 5:
