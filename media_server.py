@@ -27,7 +27,7 @@ def file_break(movie_path, client_socket):
         while m_byte:
             movie_q.put(m_byte)
             chunk_data = flashpoint_protocol.create_chunk_data(str(i + 1), m_byte)
-            chunk_msg = flashpoint_protocol.create_chunk_msg(chunk_data)
+            chunk_msg = flashpoint_protocol.create_byte_msg(b'MC', chunk_data)
             client_socket.send(chunk_msg)
             i += 1
             m_byte = f.read(BYTES_IN_CHUNK)
