@@ -1,5 +1,4 @@
 import mysql.connector
-import pickle
 
 
 class DBConnection:
@@ -58,8 +57,25 @@ class DBConnection:
         cursor.execute('SELECT movie_name, last_frame FROM seen_movies WHERE userID = %s',
                        (user_id,))
         user = cursor.fetchall()
+        print(user)
         cursor.close()
         return user
+
+    def get_poster_fpath(self, movie_name):
+        cursor = self.__db.cursor()
+        cursor.execute('SELECT poster_fpath FROM movies WHERE movie_name = %s',
+                       (movie_name,))
+        user = cursor.fetchone()
+        cursor.close()
+        return user[0]
+
+    def get_user_id(self, username, password):
+        my_cursor = self.__db.cursor()
+        my_cursor.execute('SELECT userID FROM users WHERE username = %s and user_password = %s',
+                          (username, password))
+        user = my_cursor.fetchone()
+        my_cursor.close()
+        return user[0]
 
     def update_movie_lst(self, username, password, movie_to_add, last_frame):
         cursor = self.__db.cursor()
@@ -91,9 +107,16 @@ class DBConnection:
         finally:
             cursor.close()
 
+    def get_all_posters(self):
+        cursor = self.__db.cursor()
+        cursor.execute('SELECT poster_fpath FROM movies')
+        posters = cursor.fetchall()
+        return posters
+
 
 if __name__ == '__main__':
     db = DBConnection()
     print(db.movie_exists('The Flash'))
     print(db.fetch_movie('The Flash'))
     print('movie_lst:' + str(db.get_movie_lst(1)))
+    print(db.get_poster_fpath('Superman 2025'))
