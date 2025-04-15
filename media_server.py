@@ -1,16 +1,19 @@
+import random
 from queue import Queue
 import socket
 import math
 from threading import Thread
 import flashpoint_protocol
-from db_connector import DBConnection
+import base64
 import os
 
 IP = '0.0.0.0'
+ADMIN_IP = '127.0.0.1'
 PORT = 1939
+ADMIN_PORT = 3600
 QUEUE_SIZE = 10
-LEGAL_FUNC = ['MW']
-FIRST_FUNC = 'MW'
+LEGAL_FUNC = ['MR']
+FIRST_FUNC = 'MR'
 BYTES_IN_CHUNK = 16384
 
 
@@ -18,16 +21,18 @@ def file_break(movie_path, client_socket):
     movie_q = Queue(0)
     movie_len = os.path.getsize(movie_path) / BYTES_IN_CHUNK
     movie_len = math.ceil(movie_len)
-    msg_data = flashpoint_protocol.create_proto_data(str(movie_len))
+    msg_data = flashpoint_protocol.create_proto_data(str(movie_len).encode())
     msg = flashpoint_protocol.create_proto_msg('ML', msg_data)
-    client_socket.send(msg.encode())
+    client_socket.send(msg)
+    print(msg)
     with open(movie_path, 'rb') as f:
         m_byte = f.read(BYTES_IN_CHUNK)
         i = 0
         while m_byte:
             movie_q.put(m_byte)
-            chunk_data = flashpoint_protocol.create_chunk_data(str(i + 1), m_byte)
-            chunk_msg = flashpoint_protocol.create_byte_msg(b'MC', chunk_data)
+            encoded_chunk = base64.b64encode(m_byte)
+            chunk_data = flashpoint_protocol.create_proto_data(str(i + 1).encode(), encoded_chunk)
+            chunk_msg = flashpoint_protocol.create_proto_msg('MC', chunk_data)
             client_socket.send(chunk_msg)
             i += 1
             m_byte = f.read(BYTES_IN_CHUNK)
@@ -43,13 +48,15 @@ def send_chunk(movie_q, client_socket):
         client_socket.send(chunk_msg)
 
 
-def handle_thread(client_socket, client_address, my_index):
-    db = DBConnection()
+def handle_thread(admin_sock, client_socket, client_address, my_port):
     first_msg = flashpoint_protocol.get_proto_msg(client_socket)
     while flashpoint_protocol.get_func(first_msg) != FIRST_FUNC:
         first_msg = flashpoint_protocol.get_proto_msg(client_socket)
     m_name = flashpoint_protocol.get_data(first_msg)
-    m_fpath = db.fetch_movie(m_name)
+    msg = flashpoint_protocol.create_proto_msg('MR', flashpoint_protocol.create_proto_data(m_name))
+    admin_sock.send(msg)
+    ret_msg = flashpoint_protocol.get_proto_msg(admin_sock)
+    m_fpath = flashpoint_protocol.get_data(ret_msg).decode()
     movie_q = ''
     if m_fpath == '':
         client_socket.send('ERROR'.encode())
@@ -58,10 +65,35 @@ def handle_thread(client_socket, client_address, my_index):
         movie_q = file_break(m_fpath, client_socket)
 
 
+def connect2admin():
+    try:
+        main_server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        main_server_sock.connect((ADMIN_IP, ADMIN_PORT))
+        print("Connected to admin server.")
+
+        # You can return the socket if you want to keep communicating with the main server
+        return main_server_sock
+
+    except Exception as e:
+        print("Failed to connect to main server:", e)
+        return None
+
+
 def main():
+    admin_sock = connect2admin()
+    if not admin_sock:
+        return
+    port = random.randint(1024, 65535)
+    port = 2085
+    msg = flashpoint_protocol.create_proto_msg('CS', flashpoint_protocol.create_proto_data(ADMIN_IP.encode(),
+                                                                                           str(port).encode()))
+    admin_sock.send(msg)
+    print('sent')
+    print(msg)
+
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        server_socket.bind((IP, PORT))
+        server_socket.bind((IP, port))
         server_socket.listen(QUEUE_SIZE)
         sock_list = []
         while True:
@@ -69,7 +101,7 @@ def main():
             print('connected')
             sock_list.append(client_socket)
             thread = Thread(target=handle_thread,
-                            args=(client_socket, client_address, len(sock_list) - 1))
+                            args=(admin_sock, client_socket, client_address, port))
             thread.start()
     except socket.error as err:
         print('received socket exception - ' + str(err))
