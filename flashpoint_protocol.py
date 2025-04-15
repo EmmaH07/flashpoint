@@ -1,3 +1,5 @@
+import struct
+
 LEGAL_FUNCS = ['']
 
 
@@ -5,13 +7,9 @@ def get_msg_len(proto_msg):
     return int(proto_msg.split('@')[0])
 
 
-def get_func(proto_msg):
-    func_str = proto_msg.split('@')[1]
-    func_str = func_str.split('|')[0]
-    return func_str
-
-
-def get_byte_func(byte_msg):
+def get_func(byte_msg):
+    if isinstance(byte_msg, str):
+        byte_msg = byte_msg.encode()
     ret_chunk = b''
     is_chunk = False
     is_func = True
@@ -28,9 +26,11 @@ def get_byte_func(byte_msg):
 
 
 def get_data(proto_msg, half_num=1):
-    if half_num < 1 or half_num > 2:
-        half_num = 1
-    return proto_msg.split('|')[1].split('^')[half_num - 1]
+    data = proto_msg.split(b'|')[1]
+    ret_data = data.split(b'^')[0]
+    if half_num == 2:
+        ret_data = data.split(b'^')[1]
+    return ret_data
 
 
 def get_bytes_second_data_half(byte_msg):
@@ -68,16 +68,14 @@ def get_bytes_data(byte_msg, data_half=1):
 
 
 def get_proto_msg(client_socket):
-    curr_char = client_socket.recv(1).decode()
-    msg_len = ''
-    while curr_char != '@':
-        msg_len += curr_char
-        curr_char = client_socket.recv(1).decode()
-
-    full_msg = msg_len
-    full_msg += curr_char
-    for i in range(int(msg_len)):
-        full_msg += client_socket.recv(1).decode()
+    packed_len = client_socket.recv(4)
+    while len(packed_len) < 4:
+        packed_len += client_socket.recv(4-len(packed_len))
+    msg_len = struct.unpack('>I', packed_len)[0]
+    msg = client_socket.recv(msg_len)
+    while len(msg) < msg_len:
+        msg += client_socket.recv(msg_len - len(msg))
+    full_msg = packed_len + msg
     return full_msg
 
 
@@ -96,8 +94,10 @@ def get_byte_msg(client_socket):
 
 
 def error_msg():
-    ret_str = 'ER|^'
-    return str(len(ret_str)) + '@' + ret_str
+    msg_str = b'@ER|^'
+    packed_length = struct.pack('>I', len(msg_str))
+    msg_str = packed_length + msg_str
+    return msg_str
 
 
 def create_proto_msg(func, data):
@@ -109,13 +109,23 @@ def create_proto_msg(func, data):
     :type data: str
     :return:
     """
-    msg_str = func + '|' + data
-    msg = str(len(msg_str)) + '@' + msg_str
+    msg_str = '@' + func + '|'
+    msg_str = msg_str.encode()
+    msg_data = data
+    if isinstance(msg_data, str):
+        msg_data = msg_data.encode()
+    msg_str += msg_data
+    packed_length = struct.pack('>I', len(msg_str))
+    msg = packed_length + msg_str
     return msg
 
 
-def create_proto_data(data1='', data2=''):
-    msg = data1 + '^' + data2
+def create_proto_data(data1=b'', data2=b''):
+    if isinstance(data1, str):
+        data1.encode()
+    if isinstance(data2, str):
+        data1.encode()
+    msg = data1 + b'^' + data2
     return msg
 
 
@@ -124,12 +134,5 @@ def create_chunk_data(chunk_num, chunk):
     return msg
 
 
-def create_byte_data(data1=b'', data2=b''):
-    data = data1 + b'^' + data2
-    return data
+print(create_proto_data('hi'.encode()))
 
-
-def create_byte_msg(func, data):
-    msg_bytes = func.encode() + b'|' + data
-    msg = str(len(msg_bytes)).encode() + b'@' + msg_bytes
-    return msg
