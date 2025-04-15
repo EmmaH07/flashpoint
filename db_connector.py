@@ -1,17 +1,23 @@
 import mysql.connector
+import pymysql
 
 
 class DBConnection:
     def __init__(self):
-        self.__db = mysql.connector.connect(
-            host='localhost',
-            user='root',
-            password='Ba38IltF07!+',
-            port='3306',
-            database='flashpoint'
-        )
+        print('hi')
+        try:
+            self.__db = pymysql.connect(
+                host='127.0.0.1',
+                user='root',
+                password='DbA2007!',
+                database='flashpoint',
+            )
+            print('connected')
+        except Exception as e:
+            print(f"General Exception: {e}")
 
     def movie_exists(self, movie_name):
+        print('1')
         my_cursor = self.__db.cursor()
         my_cursor.execute('SELECT movie_name FROM movies WHERE movie_name = %s', (movie_name,))
         movie = my_cursor.fetchone()
@@ -19,6 +25,7 @@ class DBConnection:
         return movie is not None
 
     def fetch_movie(self, movie_name):
+        print('2')
         my_cursor = self.__db.cursor()
         my_cursor.execute('SELECT * FROM movies WHERE movie_name = %s', (movie_name,))
         movie = my_cursor.fetchone()
@@ -53,6 +60,7 @@ class DBConnection:
             cursor.close()
 
     def get_movie_lst(self, user_id):
+        print('3')
         cursor = self.__db.cursor()
         cursor.execute('SELECT movie_name, last_frame FROM seen_movies WHERE userID = %s',
                        (user_id,))
@@ -109,14 +117,20 @@ class DBConnection:
 
     def get_all_posters(self):
         cursor = self.__db.cursor()
-        cursor.execute('SELECT poster_fpath FROM movies')
+        cursor.execute('SELECT movie_name, poster_fpath FROM movies')
         posters = cursor.fetchall()
+
         return posters
 
 
 if __name__ == '__main__':
     db = DBConnection()
-    print(db.movie_exists('The Flash'))
-    print(db.fetch_movie('The Flash'))
-    print('movie_lst:' + str(db.get_movie_lst(1)))
-    print(db.get_poster_fpath('Superman 2025'))
+    if not db:
+        print('failed')
+    else:
+        print(db.movie_exists('The Flash'))
+        print(db.fetch_movie('The Flash'))
+        print('movie_lst:' + str(db.get_movie_lst(1)))
+        print(db.get_poster_fpath('Superman 2025'))
+        print('poster list: ')
+        print(db.get_all_posters())
