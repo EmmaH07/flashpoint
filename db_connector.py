@@ -9,8 +9,8 @@ class DBConnection:
             self.__db = pymysql.connect(
                 host='127.0.0.1',
                 user='root',
-                password='DbA2007!',
-                database='flashpoint',
+                password='password',
+                database='flashpoint_database',
             )
             print('connected')
         except Exception as e:
@@ -60,7 +60,6 @@ class DBConnection:
             cursor.close()
 
     def get_movie_lst(self, user_id):
-        print('3')
         cursor = self.__db.cursor()
         cursor.execute('SELECT movie_name, last_frame FROM seen_movies WHERE userID = %s',
                        (user_id,))
