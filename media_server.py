@@ -34,45 +34,46 @@ def get_video_duration(movie_path):
     return int(duration)
 
 
-def file_break(movie_path, client_socket):
+def file_break(movie_path, client_socket, frame=0):
     movie_len = get_video_duration(movie_path)
-    msg_data = flashpoint_protocol.create_proto_data(str(movie_len).encode())
+    msg_data = flashpoint_protocol.create_proto_data(str(movie_len - frame).encode())
     msg = flashpoint_protocol.create_proto_msg('ML', msg_data)
     client_socket.send(msg)
     print(f"Sending movie length: {movie_len} seconds")
 
-    for i in range(movie_len):
-        # Create a temporary file to store each 1-second chunk
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_file:
-            tmp_name = tmp_file.name
-
-        # Use FFmpeg to extract a 1-second chunk starting at `i` seconds
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Use FFmpeg to split the video into precise 1-second segments
         ffmpeg_cmd = [
             "ffmpeg",
             "-i", movie_path,
-            "-ss", str(i),  # Start at second `i`
-            "-t", "1",  # 1 second duration
             "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-x264-params", "keyint=24:min-keyint=24",
             "-c:a", "aac",
-            "-f", "mpegts",  # Ensure this is used for streaming
-            "-y",
-            tmp_name
+            "-ar", "44100",
+            "-ac", "2",
+            "-f", "segment",
+            "-segment_time", "1",
+            "-segment_format", "mpegts",
+            os.path.join(tmpdir, "chunk%03d.ts")
         ]
-        # Run ffmpeg to extract the 1-second chunk
         subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Read the temporary chunk file and encode it
-        with open(tmp_name, "rb") as f:
-            data = f.read()  # Read the content of the chunk
-            encoded = base64.b64encode(data)  # Base64 encode the chunk
+        # Sort and stream each 1-second chunk
+        chunk_files = sorted(f for f in os.listdir(tmpdir) if f.endswith(".ts"))
+        print(chunk_files)
 
-            # Create and send the protocol message with the chunk
-            msg = flashpoint_protocol.create_proto_msg('MC', flashpoint_protocol.create_proto_data(
-                str(i).encode(), encoded))
-            client_socket.send(msg)
-
-        # Clean up by deleting the temporary file after sending the chunk
-        os.remove(tmp_name)
+        for i, fname in enumerate(chunk_files):
+            full_path = os.path.join(tmpdir, fname)
+            with open(os.path.join(tmpdir, fname), "rb") as f:
+                data = f.read()
+                encoded = base64.b64encode(data)
+                msg = flashpoint_protocol.create_proto_msg(
+                    'MC',
+                    flashpoint_protocol.create_proto_data(str(i).encode(), encoded)
+                )
+                client_socket.send(msg)
+            os.remove(full_path)
 
 
 def send_chunk(movie_q, client_socket):
@@ -89,6 +90,11 @@ def handle_thread(admin_sock, client_socket, client_address, my_port):
     while flashpoint_protocol.get_func(first_msg) != FIRST_FUNC:
         first_msg = flashpoint_protocol.get_proto_msg(client_socket)
     m_name = flashpoint_protocol.get_data(first_msg)
+    frame = flashpoint_protocol.get_data(first_msg, 2)
+    if frame == b'':
+        frame = 0
+    else:
+        frame = int(frame.decode())
     msg = flashpoint_protocol.create_proto_msg('MR', flashpoint_protocol.create_proto_data(m_name))
     admin_sock.send(msg)
     ret_msg = flashpoint_protocol.get_proto_msg(admin_sock)
@@ -98,7 +104,7 @@ def handle_thread(admin_sock, client_socket, client_address, my_port):
         client_socket.send('ERROR'.encode())
 
     else:
-        movie_q = file_break(m_fpath, client_socket)
+        file_break(m_fpath, client_socket, frame)
 
 
 def connect2admin():
