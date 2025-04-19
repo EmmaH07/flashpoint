@@ -110,15 +110,24 @@ def handle_thread(client_socket, client_address):
                 client_socket.send(msg)
 
         if func == 'GM':
-            ret_data = []
             user_id = db.get_user_id(flashpoint_protocol.get_data(ret_msg, 1),
                                      flashpoint_protocol.get_data(ret_msg, 2))
             if user_id:
                 print('logged in')
-                ret_data = get_movie_lst(user_id, db)
-                ret_data = pickle.dumps(ret_data)
-                msg = flashpoint_protocol.create_proto_msg('YM', flashpoint_protocol.create_proto_data(ret_data))
-                client_socket.send(msg)
+                m_data = get_movie_lst(user_id, db)
+                client_socket.send(flashpoint_protocol.create_proto_msg('LL',
+                                                                        flashpoint_protocol.create_proto_data(
+                                                                            str(len(m_data)).encode())))
+                for i in range(len(m_data)):
+                    img = db.get_poster_fpath(m_data[i][0])
+                    print('img file path: ' + img)
+                    img = image2bytes(img)
+                    encoded_data = base64.b64encode(img)
+                    msg = flashpoint_protocol.create_proto_msg('YM',
+                                                               flashpoint_protocol.create_proto_data(
+                                                                   m_data[i][0].encode(), str(m_data[i][1]).encode(),
+                                                                   encoded_data))
+                    client_socket.send(msg)
 
             else:
                 client_socket.send(flashpoint_protocol.error_msg())
