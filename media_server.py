@@ -1,4 +1,5 @@
 import random
+import time
 from queue import Queue
 import socket
 import math
@@ -36,44 +37,48 @@ def get_video_duration(movie_path):
 
 def file_break(movie_path, client_socket, frame=0):
     movie_len = get_video_duration(movie_path)
-    msg_data = flashpoint_protocol.create_proto_data(str(movie_len - frame).encode())
+    remaining = movie_len - frame
+
+    msg_data = flashpoint_protocol.create_proto_data(str(remaining).encode())
     msg = flashpoint_protocol.create_proto_msg('ML', msg_data)
     client_socket.send(msg)
-    print(f"Sending movie length: {movie_len} seconds")
+    print(f"Sending movie length: {remaining} seconds (starting from {frame})")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Use FFmpeg to split the video into precise 1-second segments
+    for i in range(frame, movie_len):
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as tmp_file:
+            tmp_name = tmp_file.name
+
+        # Create 1-second chunk starting at second `i`
         ffmpeg_cmd = [
             "ffmpeg",
             "-i", movie_path,
+            "-ss", str(i),  # ← move -ss after -i
+            "-t", "1",
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-x264-params", "keyint=24:min-keyint=24",
             "-c:a", "aac",
             "-ar", "44100",
             "-ac", "2",
-            "-f", "segment",
-            "-segment_time", "1",
-            "-segment_format", "mpegts",
-            os.path.join(tmpdir, "chunk%03d.ts")
+            "-f", "mpegts",
+            "-y",
+            tmp_name
         ]
+
         subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Sort and stream each 1-second chunk
-        chunk_files = sorted(f for f in os.listdir(tmpdir) if f.endswith(".ts"))
-        print(chunk_files)
+        # Send the file over the socket
+        with open(tmp_name, "rb") as f:
+            data = f.read()
+            encoded = base64.b64encode(data)
+            msg = flashpoint_protocol.create_proto_msg(
+                'MC',
+                flashpoint_protocol.create_proto_data(str(i).encode(), encoded)
+            )
+            client_socket.send(msg)
 
-        for i, fname in enumerate(chunk_files):
-            full_path = os.path.join(tmpdir, fname)
-            with open(os.path.join(tmpdir, fname), "rb") as f:
-                data = f.read()
-                encoded = base64.b64encode(data)
-                msg = flashpoint_protocol.create_proto_msg(
-                    'MC',
-                    flashpoint_protocol.create_proto_data(str(i).encode(), encoded)
-                )
-                client_socket.send(msg)
-            os.remove(full_path)
+        os.remove(tmp_name)
+        time.sleep(0.05)
 
 
 def send_chunk(movie_q, client_socket):
