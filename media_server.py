@@ -6,6 +6,9 @@ from threading import Thread
 import flashpoint_protocol
 import base64
 import os
+import subprocess
+import json
+import tempfile
 
 IP = '0.0.0.0'
 ADMIN_IP = '127.0.0.1'
@@ -17,26 +20,59 @@ FIRST_FUNC = 'MR'
 BYTES_IN_CHUNK = 16384
 
 
+def get_video_duration(movie_path):
+    result = subprocess.run([
+        'ffprobe',
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'json',
+        movie_path
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    info = json.loads(result.stdout)
+    duration = float(info['format']['duration'])
+    return int(duration)
+
+
 def file_break(movie_path, client_socket):
-    movie_q = Queue(0)
-    movie_len = os.path.getsize(movie_path) / BYTES_IN_CHUNK
-    movie_len = math.ceil(movie_len)
+    movie_len = get_video_duration(movie_path)
     msg_data = flashpoint_protocol.create_proto_data(str(movie_len).encode())
     msg = flashpoint_protocol.create_proto_msg('ML', msg_data)
     client_socket.send(msg)
-    print(msg)
-    with open(movie_path, 'rb') as f:
-        m_byte = f.read(BYTES_IN_CHUNK)
-        i = 0
-        while m_byte:
-            movie_q.put(m_byte)
-            encoded_chunk = base64.b64encode(m_byte)
-            chunk_data = flashpoint_protocol.create_proto_data(str(i + 1).encode(), encoded_chunk)
-            chunk_msg = flashpoint_protocol.create_proto_msg('MC', chunk_data)
-            client_socket.send(chunk_msg)
-            i += 1
-            m_byte = f.read(BYTES_IN_CHUNK)
-    return movie_q
+    print(f"Sending movie length: {movie_len} seconds")
+
+    for i in range(movie_len):
+        # Create a temporary file to store each 1-second chunk
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_file:
+            tmp_name = tmp_file.name
+
+        # Use FFmpeg to extract a 1-second chunk starting at `i` seconds
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-i", movie_path,
+            "-ss", str(i),  # Start at second `i`
+            "-t", "1",  # 1 second duration
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-f", "mpegts",  # Ensure this is used for streaming
+            "-y",
+            tmp_name
+        ]
+        # Run ffmpeg to extract the 1-second chunk
+        subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Read the temporary chunk file and encode it
+        with open(tmp_name, "rb") as f:
+            data = f.read()  # Read the content of the chunk
+            encoded = base64.b64encode(data)  # Base64 encode the chunk
+
+            # Create and send the protocol message with the chunk
+            msg = flashpoint_protocol.create_proto_msg('MC', flashpoint_protocol.create_proto_data(
+                str(i).encode(), encoded))
+            client_socket.send(msg)
+
+        # Clean up by deleting the temporary file after sending the chunk
+        os.remove(tmp_name)
 
 
 def send_chunk(movie_q, client_socket):
