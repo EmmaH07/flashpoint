@@ -1,5 +1,4 @@
 import random
-import time
 from queue import Queue
 import socket
 import math
@@ -10,6 +9,7 @@ import os
 import subprocess
 import json
 import tempfile
+import select
 
 IP = '0.0.0.0'
 ADMIN_IP = '127.0.0.1'
@@ -35,59 +35,114 @@ def get_video_duration(movie_path):
     return int(duration)
 
 
-def file_break(movie_path, client_socket, frame=0):
+def file_break(movie_path, client_socket, admin_socket, frame=0):
+    stop = False
     movie_len = get_video_duration(movie_path)
-    remaining = movie_len - frame
-
-    msg_data = flashpoint_protocol.create_proto_data(str(remaining).encode())
+    msg_data = flashpoint_protocol.create_proto_data(str(movie_len - frame).encode())
     msg = flashpoint_protocol.create_proto_msg('ML', msg_data)
     client_socket.send(msg)
-    print(f"Sending movie length: {remaining} seconds (starting from {frame})")
+    print(f"Sending movie length: {movie_len} seconds")
+    print('frame: ')
+    print(frame)
 
-    for i in range(frame, movie_len):
-        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as tmp_file:
-            tmp_name = tmp_file.name
-
-        # Create 1-second chunk starting at second `i`
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Use FFmpeg to split the video into precise 1-second segments
         ffmpeg_cmd = [
             "ffmpeg",
             "-i", movie_path,
-            "-ss", str(i),  # ← move -ss after -i
-            "-t", "1",
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-x264-params", "keyint=24:min-keyint=24",
             "-c:a", "aac",
             "-ar", "44100",
             "-ac", "2",
-            "-f", "mpegts",
-            "-y",
-            tmp_name
+            "-f", "segment",
+            "-segment_time", "1",
+            "-segment_format", "mpegts",
+            os.path.join(tmpdir, "chunk%03d.ts")
         ]
-
         subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Send the file over the socket
-        with open(tmp_name, "rb") as f:
-            data = f.read()
-            encoded = base64.b64encode(data)
-            msg = flashpoint_protocol.create_proto_msg(
-                'MC',
-                flashpoint_protocol.create_proto_data(str(i).encode(), encoded)
-            )
-            client_socket.send(msg)
+        # Sort and stream each 1-second chunk
+        chunk_files = sorted(f for f in os.listdir(tmpdir) if f.endswith(".ts"))
+        print(chunk_files)
 
-        os.remove(tmp_name)
-        time.sleep(0.05)
+        send = True
+        for i in range(frame, movie_len):
+            rlist, _, _ = select.select([client_socket], [], [], 0.8)  # Use select with short timeout
+            if rlist:
+                try:
+                    stop_msg = flashpoint_protocol.get_proto_msg(client_socket)
+                    if flashpoint_protocol.get_func(stop_msg) == 'PM':
+                        send = False
+                        username = flashpoint_protocol.get_data(stop_msg)
+                        password = flashpoint_protocol.get_data(stop_msg, 2)
+                        movie = flashpoint_protocol.get_data(stop_msg, 3)
+                        frame = flashpoint_protocol.get_data(stop_msg, 4)
+                        if int(frame.decode()) > movie_len - 3:
+                            frame = 0
+                        data = flashpoint_protocol.create_proto_data(username, password, movie, frame)
+                        msg = flashpoint_protocol.create_proto_msg('UD', data)
+                        try:
+                            if admin_socket:
+                                print("hello admin")
+                                admin_socket.send(msg)
+                                print('sent to admin')
+                                client_socket.send(flashpoint_protocol.create_proto_msg(
+                                    'DS', flashpoint_protocol.create_proto_data()))
+                                print('sent stop')
+                                stop = True
+                        except (BrokenPipeError, ConnectionResetError) as e:
+                            print(f"[!] Error sending stop message to admin: {e}")
+                except Exception as e:
+                    print(f"[!] Error while handling stop message: {e}")
+                    break
 
+            # If the socket is still open, send the chunk
+            if send:
+                full_path = os.path.join(tmpdir, chunk_files[i])
+                try:
+                    with open(full_path, "rb") as f:
+                        data = f.read()
+                        encoded = base64.b64encode(data)
+                        msg = flashpoint_protocol.create_proto_msg(
+                            'MC',
+                            flashpoint_protocol.create_proto_data(str(i).encode(), encoded)
+                        )
+                        client_socket.send(msg)  # Try sending chunk if the socket is open
+                except (BrokenPipeError, ConnectionResetError) as e:
+                    print(f"[!] Client disconnected while sending chunk {i}: {e}")
+                    break
 
-def send_chunk(movie_q, client_socket):
-    len_msg = flashpoint_protocol.create_proto_msg('ML', flashpoint_protocol.create_proto_data(str(movie_q.qsize())))
-    client_socket.send(len_msg.encode())
-    for i in range(movie_q.qsize()):
-        chunk_msg = flashpoint_protocol.create_proto_msg('MC', str(i + 1)) + '^'
-        chunk_msg = chunk_msg.encode() + movie_q.get()
-        client_socket.send(chunk_msg)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+
+    if not stop:
+        stop_msg = flashpoint_protocol.get_proto_msg(client_socket)
+        print('got: ')
+        print(stop_msg)
+        if flashpoint_protocol.get_func(stop_msg) == 'PM':
+            send = False
+            username = flashpoint_protocol.get_data(stop_msg)
+            password = flashpoint_protocol.get_data(stop_msg, 2)
+            movie = flashpoint_protocol.get_data(stop_msg, 3)
+            frame = flashpoint_protocol.get_data(stop_msg, 4)
+            if int(frame.decode()) > movie_len - 3:
+                frame = '0'.encode()
+            data = flashpoint_protocol.create_proto_data(username, password, movie, frame)
+            msg = flashpoint_protocol.create_proto_msg('UD', data)
+            try:
+                if admin_socket:
+                    print("hello admin")
+                    admin_socket.send(msg)
+                    print('sent to admin')
+                    client_socket.send(flashpoint_protocol.create_proto_msg(
+                        'DS', flashpoint_protocol.create_proto_data()))
+                    print('sent stop')
+                    stop = True
+            except (BrokenPipeError, ConnectionResetError) as e:
+                print(f"[!] Error sending stop message to admin: {e}")
+
 
 
 def handle_thread(admin_sock, client_socket, client_address, my_port):
@@ -109,7 +164,7 @@ def handle_thread(admin_sock, client_socket, client_address, my_port):
         client_socket.send('ERROR'.encode())
 
     else:
-        file_break(m_fpath, client_socket, frame)
+        file_break(m_fpath, client_socket, admin_sock, frame)
 
 
 def connect2admin():
