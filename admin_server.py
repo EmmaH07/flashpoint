@@ -115,6 +115,7 @@ def handle_thread(client_socket, client_address):
             if user_id:
                 print('logged in')
                 m_data = get_movie_lst(user_id, db)
+                print(m_data)
                 client_socket.send(flashpoint_protocol.create_proto_msg('LL',
                                                                         flashpoint_protocol.create_proto_data(
                                                                             str(len(m_data)).encode())))
@@ -128,6 +129,7 @@ def handle_thread(client_socket, client_address):
                                                                    m_data[i][0].encode(), str(m_data[i][1]).encode(),
                                                                    encoded_data))
                     client_socket.send(msg)
+                    print('sent ' + str(i))
 
             else:
                 client_socket.send(flashpoint_protocol.error_msg())
@@ -176,6 +178,17 @@ def handle_thread(client_socket, client_address):
             msg = flashpoint_protocol.create_proto_msg('MW',
                                                        flashpoint_protocol.create_proto_data(m_fpath.encode()))
             client_socket.send(msg)
+
+        if func == 'UD':
+            username = flashpoint_protocol.get_data(ret_msg).decode()
+            password = flashpoint_protocol.get_data(ret_msg, 2).decode()
+            movie = flashpoint_protocol.get_data(ret_msg, 3).decode()
+            frame = int(flashpoint_protocol.get_data(ret_msg, 4).decode())
+            if frame == 0:
+                db.remove_seen_movie(username, password, movie)
+            else:
+                db.update_last_frame(username, password, movie, frame)
+            db = DBConnection()
 
         print('#')
         ret_msg = flashpoint_protocol.get_proto_msg(client_socket)
