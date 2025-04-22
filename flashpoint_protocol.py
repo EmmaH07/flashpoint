@@ -27,9 +27,11 @@ def get_func(byte_msg):
 
 def get_data(proto_msg, half_num=1):
     data = proto_msg.split(b'|')[1]
-    ret_data = data.split(b'^')[0]
-    if half_num == 2:
-        ret_data = data.split(b'^')[1]
+    if half_num < 1:
+        half_num = 1
+    elif half_num > 4:
+        half_num = 4
+    ret_data = data.split(b'^')[half_num-1]
     return ret_data
 
 
@@ -94,7 +96,7 @@ def get_byte_msg(client_socket):
 
 
 def error_msg():
-    msg_str = b'@ER|^'
+    msg_str = b'@ER|^^'
     packed_length = struct.pack('>I', len(msg_str))
     msg_str = packed_length + msg_str
     return msg_str
@@ -120,12 +122,14 @@ def create_proto_msg(func, data):
     return msg
 
 
-def create_proto_data(data1=b'', data2=b''):
+def create_proto_data(data1=b'', data2=b'', data3=b'', data4=b''):
     if isinstance(data1, str):
         data1.encode()
     if isinstance(data2, str):
-        data1.encode()
-    msg = data1 + b'^' + data2
+        data2.encode()
+    if isinstance(data3, str):
+        data3.encode()
+    msg = data1 + b'^' + data2 + b'^' + data3 + b'^' + data4
     return msg
 
 
