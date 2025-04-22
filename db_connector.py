@@ -10,7 +10,7 @@ class DBConnection:
                 host='127.0.0.1',
                 user='root',
                 password='password',
-                database='flashpoint_database',
+                database='db',
             )
             print('connected')
         except Exception as e:
@@ -60,13 +60,22 @@ class DBConnection:
             cursor.close()
 
     def get_movie_lst(self, user_id):
-        cursor = self.__db.cursor()
-        cursor.execute('SELECT movie_name, last_frame FROM seen_movies WHERE userID = %s',
-                       (user_id,))
-        user = cursor.fetchall()
-        print(user)
-        cursor.close()
-        return user
+        try:
+            conn = pymysql.connect(
+                host='127.0.0.1',
+                user='root',
+                password='password',
+                database='db',
+            )
+            cursor = conn.cursor()
+            cursor.execute('SELECT movie_name, last_frame FROM seen_movies WHERE userID = %s', (user_id,))
+            user = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return user
+        except Exception as e:
+            print(f"[!] Error fetching movie list: {e}")
+            return []
 
     def get_poster_fpath(self, movie_name):
         cursor = self.__db.cursor()
@@ -84,42 +93,53 @@ class DBConnection:
         my_cursor.close()
         return user[0]
 
-    def update_movie_lst(self, username, password, movie_to_add, last_frame):
-        cursor = self.__db.cursor()
-        cursor.execute('SELECT (movies, frames) FROM users WHERE username = %s AND user_password = %s',
-                       (username, password))
-        user = cursor.fetchone()
-        movie_str = ''
-        frames_str = ''
-        if user[0] is not None and user[1] is not None:
-            movie_str = user[0]
-            frames_str = user[1]
-
-        if movie_to_add != '' and last_frame != '' and movie_str != '':
-            movie_str += '|' + movie_to_add
-            frames_str += '|' + last_frame
-
-        elif movie_str == '' and movie_to_add != '' and last_frame != '':
-            movie_str += movie_to_add
-            frames_str += last_frame
-
-        try:
-            sql = "INSERT INTO users (movies, frames) VALUES (%s, %s) WHERE username = %s AND user_password = %s'"
-            cursor.execute(sql, (movie_str, frames_str, username, password))
-            self.__db.commit()
-            return True  # Success
-        except mysql.connector.IntegrityError:
-            print("Error: Username already exists.")
-            return False  # Failure
-        finally:
-            cursor.close()
-
     def get_all_posters(self):
         cursor = self.__db.cursor()
         cursor.execute('SELECT movie_name, poster_fpath FROM movies')
         posters = cursor.fetchall()
 
         return posters
+
+    def update_last_frame(self, username, password, movie_name, frame):
+        user_id = self.get_user_id(username, password)
+        cursor = self.__db.cursor()
+
+        if user_id:
+            # Check if the movie is already in the seen_movies table
+            sql = 'SELECT last_frame FROM seen_movies WHERE userID = %s AND movie_name = %s'
+            cursor.execute(sql, (user_id, movie_name))
+            result = cursor.fetchone()  # Get the actual result
+
+            if result:
+                # Update the existing record
+                sql = 'UPDATE seen_movies SET last_frame = %s WHERE userID = %s AND movie_name = %s'
+                cursor.execute(sql, (frame, user_id, movie_name))
+                print('yay')
+            else:
+                # Insert a new record
+                sql = 'INSERT INTO seen_movies (userID, movie_name, last_frame) VALUES (%s, %s, %s)'
+                cursor.execute(sql, (user_id, movie_name, frame))
+                print('or nor')
+
+            self.__db.commit()
+        else:
+            print('something went wrong')
+        cursor.close()
+
+    def remove_seen_movie(self, username, password, movie_name):
+        user_id = self.get_user_id(username, password)
+        cursor = self.__db.cursor()
+
+        # Check if the movie is already in the seen_movies table
+        sql = 'SELECT last_frame FROM seen_movies WHERE userID = %s AND movie_name = %s'
+        cursor.execute(sql, (user_id, movie_name))
+        result = cursor.fetchone()  # Get the actual result
+        if result:
+            # remove the movie
+            sql = 'DELETE FROM seen_movies WHERE userID = %s AND movie_name = %s'
+            cursor.execute(sql, (user_id, movie_name))
+            self.__db.commit()
+        cursor.close()
 
 
 if __name__ == '__main__':
