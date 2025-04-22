@@ -7,6 +7,8 @@ import subprocess
 import tkinter as tk
 from queue import Queue
 from tkinter import *
+import time
+import threading
 
 from PIL import Image, ImageTk
 from PIL import ImageFile
@@ -47,38 +49,115 @@ def slider():
         txt_label.after(400, slider)
 
 
-def get_chunks(my_socket, movie_len, frame=0):
+def run_get_chunks(my_socket, movie_len, movie_name, username, password, frame=0):
+    thread = threading.Thread(
+        target=get_chunks,
+        args=(my_socket, movie_len, movie_name, username, password, frame),
+        daemon=True  # dies when the main program exits
+    )
+    thread.start()
+
+
+def send_stop_message(client_socket, username, password, movie_name, frame):
+    global hposter_lst, empty
+    data = flashpoint_protocol.create_proto_data(
+        username.encode(), password.encode(), movie_name.encode(), str(frame).encode()
+    )
+    msg = flashpoint_protocol.create_proto_msg("PM", data)
+    print(msg)
+    try:
+        client_socket.sendall(msg)
+        hposter_lst = []
+        empty = False
+        time.sleep(0.5)
+        print('sent stop')
+    except Exception as e:
+        print(f"[!] Error sending stop message: {e}")
+
+
+def wait_for_disconnect(sock):
+    try:
+        print("[CLIENT] Waiting for 'DS' from media server...")
+        ds_msg = flashpoint_protocol.get_proto_msg(sock)
+        while flashpoint_protocol.get_func(ds_msg) == 'MC':
+            ds_msg = flashpoint_protocol.get_proto_msg(sock)
+        if flashpoint_protocol.get_func(ds_msg) == 'DS':
+            print("[CLIENT] ✅ Received 'DS' from server")
+        else:
+            print(f"[CLIENT] ❌ Received unexpected message: {flashpoint_protocol.get_func(ds_msg)}")
+    except Exception as e:
+        print(f"[CLIENT] ❗ Error while waiting for 'DS': {e}")
+
+
+def get_chunks(my_socket, movie_len, movie_name, username, password, frame=0):
     q = Queue(0)
-    ffplay = subprocess.Popen(["ffplay", "-", "-probesize", "5000000", "-analyzeduration", "10000000"], stdin=subprocess.PIPE)
+    ffplay = subprocess.Popen([
+        'ffplay',
+        '-window_title', f'Now Playing: {movie_name}',
+        '-i', 'pipe:0',
+        '-autoexit'
+    ], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     play = False
-    move = True
-    start = False
-    for i in range(movie_len):
-        chunk_msg = flashpoint_protocol.get_proto_msg(my_socket)
-        m_chunk = flashpoint_protocol.get_data(chunk_msg, 2)
-        m_chunk = base64.b64decode(m_chunk)
-        m_num = int(flashpoint_protocol.get_data(chunk_msg).decode())
-        q.put(m_chunk)
-        if q.qsize() > 5:
-            play = True
+    last_frame = 0
 
-        if play and q.qsize() > frame:
-            if move:
-                r = frame - 1
-                if r < 0:
-                    r = 0
-                for n in range(r):
-                    print(n)
-                    c = q.get()
+    wait_txt = "Preparing Your Movie..."
+    wait_txt_label = Label(watch_frame, text=wait_txt, font=('ariel narrow', 40, 'bold'), fg='white',
+                           bg='#262626')
+    wait_txt_label.place(y=200, x=400)
+    watch_frame.update_idletasks()
+    sent = False
+
+    try:
+        for i in range(movie_len):
+            chunk_msg = flashpoint_protocol.get_proto_msg(my_socket)
+            m_chunk = flashpoint_protocol.get_data(chunk_msg, 2)
+            m_chunk = base64.b64decode(m_chunk)
+            q.put(m_chunk)
+
+            if q.qsize() > 5:
+                play = True
+                wait_txt_label.destroy()
+                watch_frame.update_idletasks()
+
+            if play:
                 ffplay.stdin.write(q.get())
-                move = False
-            else:
-                if q.qsize() > 2 or start:
-                    start = True
-                    ffplay.stdin.write(q.get())
+                last_frame += 1
 
-    ffplay.stdin.close()
-    ffplay.wait()
+            if ffplay.poll() is not None and not sent:
+                send_stop_message(my_socket, username, password, movie_name, str(last_frame + frame))
+                sent = True
+
+        while not q.empty():
+            ffplay.stdin.write(q.get())
+            last_frame += 1
+
+        ffplay.stdin.close()
+
+        if ffplay.poll() is not None and not sent:
+            send_stop_message(my_socket, username, password, movie_name, str(last_frame + frame))
+            sent = True
+
+    except (BrokenPipeError, ValueError):
+        print("[CLIENT] ⚠️ Chunk receiving interrupted")
+
+    finally:
+        if not sent:
+            send_stop_message(my_socket, username, password, movie_name, str(last_frame + frame))
+
+        # Wait fully for 'DS' before closing
+        wait_thread = threading.Thread(target=wait_for_disconnect, args=(my_socket,))
+        wait_thread.start()
+        wait_thread.join()  # no timeout!
+
+        try:
+            my_socket.shutdown(socket.SHUT_WR)
+
+        except Exception:
+            pass
+        my_socket.close()
+
+        ffplay.stdin.close()
+        ffplay.wait()
 
 
 def byte2img(b_img):
@@ -94,16 +173,20 @@ def byte2img(b_img):
     return img
 
 
-def recv_img_lst(client_socket, username, password, display_label):
+def recv_img_lst(client_socket, username, password):
     global poster_lst
     poster_lst = []
     client_socket.send(flashpoint_protocol.create_proto_msg('AP', flashpoint_protocol.create_proto_data()))
     lst_len = flashpoint_protocol.get_proto_msg(client_socket)
     if flashpoint_protocol.get_func(lst_len) == 'LL':
         lst_len = flashpoint_protocol.get_data(lst_len)
-        display_label.destroy()
         lib_frame.update_idletasks()
         for i in range(int(lst_len)):
+            wait_txt = "Loading..."
+            wait_txt_label = Label(lib_frame, text=wait_txt, font=('ariel narrow', 40, 'bold'), fg='white',
+                                   bg='#262626')
+            wait_txt_label.place(y=355, x=550)
+            lib_frame.update_idletasks()
             img_msg = flashpoint_protocol.get_proto_msg(client_socket)
             print('img message')
             print(flashpoint_protocol.get_data(img_msg, 2))
@@ -112,38 +195,53 @@ def recv_img_lst(client_socket, username, password, display_label):
             if img:
                 poster_lst.append((flashpoint_protocol.get_data(img_msg).decode(), img))
                 if i >= 7:
+                    lib_frame.forget()
                     display_library(client_socket, username, password)
-                    lib_frame.update_idletasks()
-
+                    lib_frame.pack()
+            wait_txt_label.destroy()
+            lib_frame.update_idletasks()
+        library_screen(client_socket, username, password)
     return poster_lst
 
 
 def get_paused_movies(username, password, client_socket):
-    global hposter_lst
+    global hposter_lst, empty
     msg = flashpoint_protocol.create_proto_msg('GM', flashpoint_protocol.create_proto_data(username.encode(),
                                                                                            password.encode()))
     client_socket.send(msg)
     ret_msg = flashpoint_protocol.get_proto_msg(client_socket)
     print('get movie return message:')
-    print(ret_msg)
     print(flashpoint_protocol.get_func(ret_msg))
     if flashpoint_protocol.get_func(ret_msg) == 'LL':
         lst_len = int(flashpoint_protocol.get_data(ret_msg).decode())
+        if lst_len == 0:
+            empty = True
         for i in range(lst_len):
+            wait_txt = "Loading..."
+            wait_txt_label = Label(home_pg_frame, text=wait_txt, font=('ariel narrow', 40, 'bold'), fg='white',
+                                   bg='#262626')
+            wait_txt_label.place(y=600, x=550)
+            home_pg_frame.update_idletasks()
             m_msg = flashpoint_protocol.get_proto_msg(client_socket)
             m_name = flashpoint_protocol.get_data(m_msg)
+            print('movie message: ')
+            print(m_msg)
             m_frame = flashpoint_protocol.get_data(m_msg, 2)
             m_poster = base64.b64decode(flashpoint_protocol.get_data(m_msg, 3))
             m_poster = byte2img(m_poster)
+            home_pg_frame.forget()
             hposter_lst.append((m_name, m_frame, m_poster))
             display_movies(client_socket, username, password)
+            home_pg_frame.pack()
             home_pg_frame.update_idletasks()
+            wait_txt_label.destroy()
+            home_pg_frame.update_idletasks()
+        home_screen(client_socket, username, password)
     return hposter_lst
 
 
 def display_movies(client_socket, username, password, counter=0):
     global hposter_lst, title_buttons, label_lst, poster_img_refs
-    print(type(counter))
 
     title_buttons = []
     label_lst = []
@@ -156,7 +254,6 @@ def display_movies(client_socket, username, password, counter=0):
 
         if counter + i < len(hposter_lst):
             title, frame, m_img = hposter_lst[counter + i]
-            print(title)
             frame = int(frame.decode())
             movie_button = Button(home_pg_frame, text=title, command=lambda t=title.decode():
                                   start_watch(my_socket, t, username, password, frame),
@@ -266,7 +363,8 @@ def watch_screen(client_socket, movie_name, username, password, frame=0):
             m_server_sock.connect((media_ip, media_port))
             print("Connected to media server.")
             msg = flashpoint_protocol.create_proto_msg('MR',
-                                                       flashpoint_protocol.create_proto_data(movie_name.encode()))
+                                                       flashpoint_protocol.create_proto_data(movie_name.encode(),
+                                                                                             str(frame).encode()))
             m_server_sock.send(msg)
             ret_msg = flashpoint_protocol.get_proto_msg(m_server_sock)
             if flashpoint_protocol.get_func(ret_msg) == 'ML':
@@ -274,7 +372,7 @@ def watch_screen(client_socket, movie_name, username, password, frame=0):
                 print(movie_len)
                 print(type(movie_len))
                 movie_len = int(movie_len)
-                get_chunks(m_server_sock, movie_len, frame)
+                run_get_chunks(m_server_sock, movie_len, movie_name, username, password, frame)
 
         except Exception as e:
             print("[!] Failed to connect to main server:", e)
@@ -378,6 +476,31 @@ def up(counter, username, password, client_socket):
     library_screen(client_socket, username, password, counter)
 
 
+def next(client_socket, username, password,  counter=0):
+    global hposter_lst
+    print('curr counter: ' + str(counter))
+    print(len(hposter_lst))
+    counter += 4
+    if counter > len(hposter_lst):
+        counter -= 4
+    print('next counter' + str(counter))
+    home_screen(client_socket, username, password, counter)
+
+
+def prev(client_socket, username, password,  counter=0):
+    global hposter_lst
+    print('curr counter: ' + str(counter))
+    if counter >= len(hposter_lst):
+        num = len(hposter_lst) % 4
+        counter -= num
+    elif counter - 4 < 0:
+        counter = 0
+    else:
+        counter -= 4
+    print('prev counter: ' + str(counter))
+    home_screen(client_socket, username, password, counter)
+
+
 def start_watch(client_socket, movie_name, username, password, frame=0):
     print(movie_name)
     global current_frame
@@ -390,11 +513,12 @@ def start_watch(client_socket, movie_name, username, password, frame=0):
 
 
 def login_screen(client_socket):
-    global current_frame
+    global current_frame, hposter_lst
     if current_frame:
         current_frame.pack_forget()  # Hide current frame
     current_frame = login_frame
-    login_frame.pack()  # Show login frame
+    login_frame.pack()
+    hposter_lst = []
     create_login_frame(client_socket)  # Ensure UI elements are initialized properly
 
 
@@ -416,13 +540,13 @@ def library_screen(client_socket, username, password, counter=0):
     create_lib_pg(client_socket, username, password, counter)
 
 
-def home_screen(client_socket, username, password):
+def home_screen(client_socket, username, password, counter=0):
     global current_frame
     if current_frame:
         current_frame.pack_forget()
     current_frame = home_pg_frame
     home_pg_frame.pack()
-    create_home_pg(client_socket, username, password)
+    create_home_pg(client_socket, username, password, counter)
 
 
 def create_login_frame(client_socket):
@@ -555,15 +679,16 @@ def create_signup_frame(my_socket):
     signup_frame.pack()
 
 
-def create_home_pg(client_socket, username, password):
-    global home_pg_frame, library_bg, hposter_lst
+def create_home_pg(client_socket, username, password, counter=0):
+    global home_pg_frame, library_bg, hposter_lst, empty
     bg_label = Label(home_pg_frame, image=library_bg)
     bg_label.place(x=0, y=0)
     home_txt = "Continue Watching"
     home_txt_label = Label(home_pg_frame, text=home_txt, font=('ariel narrow', 40, 'bold'), fg='white', bg='#262626')
     home_txt_label.place(y=100, x=450)
 
-    change_2lib = Button(home_pg_frame, text='Library', command=lambda: library_screen(my_socket, username, password),
+    change_2lib = Button(home_pg_frame, text='Library', command=lambda: library_screen(client_socket,
+                                                                                       username, password),
                          activebackground="#7d0101",
                          activeforeground="#fcba03",
                          anchor="center",
@@ -602,13 +727,19 @@ def create_home_pg(client_socket, username, password):
                            width=11)
     change_2login.place(x=920, y=10)
 
-    if not hposter_lst:
+    if not hposter_lst and not empty:
         for i in range(0, 4):
             x = [X1, X2, X3, X4][i % 4]
             p_lib_label = Label(lib_frame, image=empty_poster, background='#262626')
             p_lib_label.place(x=x, y=HOME_Y)
         hposter_lst = get_paused_movies(username, password, client_socket)
-    display_movies(client_socket, username, password)
+    counter = display_movies(client_socket, username, password, counter)
+    next_button = Button(home_pg_frame, image=next_img, command=lambda: next(client_socket, username, password,
+                                                                             counter), bg='#262626')
+    next_button.place(x=715, y=650)
+    prev_button = Button(home_pg_frame, image=prev_img, command=lambda: prev(client_socket, username, password,
+                                                                             counter), bg='#262626')
+    prev_button.place(x=600, y=650)
     home_pg_frame.pack()
 
 
@@ -664,12 +795,8 @@ def create_lib_pg(client_socket, username, password, counter=0):
             x = [X1, X2, X3, X4][i % 4]
             p_lib_label = Label(lib_frame, image=empty_poster, background='#262626')
             p_lib_label.place(x=x, y=y)
-        lib_txt = "Loading..."
-        lib_txt_label = Label(lib_frame, text=lib_txt, font=('ariel narrow', 40, 'bold'), fg='white',
-                              bg='#262626')
-        lib_txt_label.place(y=350, x=550)
         lib_frame.update_idletasks()
-        poster_lst = recv_img_lst(client_socket, username, password, lib_txt_label)
+        poster_lst = recv_img_lst(client_socket, username, password)
 
     counter = display_library(client_socket, username, password, counter)
 
@@ -720,12 +847,13 @@ current_frame = login_frame
 # set user dictionary
 user_dict = {}
 
-# set global lists
+# set global variables
 poster_lst = []
 hposter_lst = []
 title_buttons = []
 label_lst = []
 poster_img_refs = []
+empty = False
 
 # set sliding text
 txt = 'flashpoint.io'
