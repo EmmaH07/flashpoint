@@ -1,15 +1,16 @@
-import random
-from queue import Queue
-import socket
-import math
-from threading import Thread
-import flashpoint_protocol
 import base64
-import os
-import subprocess
 import json
+import os
+import random
+import socket
+import subprocess
 import tempfile
+from threading import Thread
+import logging
 import select
+
+import flashpoint_protocol
+from adv_db import AdvDB
 
 IP = '0.0.0.0'
 ADMIN_IP = '127.0.0.1'
@@ -18,10 +19,33 @@ ADMIN_PORT = 3600
 QUEUE_SIZE = 10
 LEGAL_FUNC = ['MR']
 FIRST_FUNC = 'MR'
-BYTES_IN_CHUNK = 16384
+MOVIE_DICT = {'10 Things I Hate About You': 'movies/10things_trailer.mp4', 'Aladdin': 'movies/aladdin_trailer.mp4',
+              'Dark Knight': 'movies/dark_knight.mp4', 'Inception': 'movies/inception.mp4',
+              'Lord Of The Rings': 'movies/rings.mp4', 'Merlin': 'movies/merlin.mp4',
+              'Never Ending Story': 'movies/never_ending.mp4', "Singin' In The Rain": 'movies/rain.mp4',
+              'Star Wars': 'movies/star_wars.mp4', 'Superman 1978': 'movies/superman1978.mp4',
+              'Superman 2025': 'movies/superman2025.mp4', 'The Batman': 'movies/the_batman.mp4',
+              'The Flash': 'movies/the_flash.mp4'}
 
 
-def get_video_duration(movie_path):
+def handle_err(client_socket):
+    """
+    closing the client socket in case of an error
+    :param client_socket: the client's socket
+    :return:
+    """
+    client_socket.close()
+
+
+def get_video_duration(movie_path, chunk_duration=10):
+    """
+    the func checks how many 10 seconds chunks is the movie made of
+    :param movie_path: the movie's file path
+    :type movie_path: str
+    :param chunk_duration: what is the amount of seconds each chunk is made of
+    :type chunk_duration: int
+    :return: the amount of 10 seconds chunks the movie contains
+    """
     result = subprocess.run([
         'ffprobe',
         '-v', 'error',
@@ -32,21 +56,38 @@ def get_video_duration(movie_path):
 
     info = json.loads(result.stdout)
     duration = float(info['format']['duration'])
-    return int(duration)
+    movie_len = duration // chunk_duration
+    if duration % chunk_duration > 0:
+        movie_len += 1
+    return int(movie_len)
 
 
-def file_break(movie_path, client_socket, admin_socket, frame=0):
+def file_break(movie_path, client_socket, admin_socket, port, frame=0):
+    """
+    breaking the movie into 10 seconds movie chunks before sending to client
+
+    :param movie_path: the movie file path
+    :type movie_path: str
+    :param client_socket: the client's socket
+    :param admin_socket: the admin's socket
+    :param port: the media server's port
+    :type port: int
+    :param frame: the last frame the client stopped at
+    :type frame: int
+    :return:
+    """
+
     stop = False
+
+    # sending a 'movie length' message to the client
     movie_len = get_video_duration(movie_path)
     msg_data = flashpoint_protocol.create_proto_data(str(movie_len - frame).encode())
     msg = flashpoint_protocol.create_proto_msg('ML', msg_data)
     client_socket.send(msg)
-    print(f"Sending movie length: {movie_len} seconds")
-    print('frame: ')
-    print(frame)
+    logging.debug('Sent to client: ML')
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Use FFmpeg to split the video into precise 1-second segments
+        # Use FFmpeg to split the video into precise 10-second segments
         ffmpeg_cmd = [
             "ffmpeg",
             "-i", movie_path,
@@ -57,45 +98,70 @@ def file_break(movie_path, client_socket, admin_socket, frame=0):
             "-ar", "44100",
             "-ac", "2",
             "-f", "segment",
-            "-segment_time", "1",
+            "-segment_time", "10",
             "-segment_format", "mpegts",
             os.path.join(tmpdir, "chunk%03d.ts")
         ]
         subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Sort and stream each 1-second chunk
+        # Sort and stream each 10-second chunk
         chunk_files = sorted(f for f in os.listdir(tmpdir) if f.endswith(".ts"))
-        print(chunk_files)
 
         send = True
         for i in range(frame, movie_len):
+            # checking if a stop message was received.
             rlist, _, _ = select.select([client_socket], [], [], 0.8)  # Use select with short timeout
             if rlist:
                 try:
                     stop_msg = flashpoint_protocol.get_proto_msg(client_socket)
+                    logging.debug('Got message from client: ' + flashpoint_protocol.get_func(stop_msg))
                     if flashpoint_protocol.get_func(stop_msg) == 'PM':
+                        # updating the var in order to stop sending chunks to the client
                         send = False
                         username = flashpoint_protocol.get_data(stop_msg)
                         password = flashpoint_protocol.get_data(stop_msg, 2)
                         movie = flashpoint_protocol.get_data(stop_msg, 3)
                         frame = flashpoint_protocol.get_data(stop_msg, 4)
-                        if int(frame.decode()) > movie_len - 3:
-                            frame = 0
+
+                        if int(frame.decode()) >= movie_len:
+                            frame = -1
+
+                        # asking admin server to update the database
                         data = flashpoint_protocol.create_proto_data(username, password, movie, frame)
                         msg = flashpoint_protocol.create_proto_msg('UD', data)
+
                         try:
                             if admin_socket:
-                                print("hello admin")
+                                # sending UD message to admin server
                                 admin_socket.send(msg)
-                                print('sent to admin')
+                                logging.debug('Sent message to admin: UD')
+
+                                # sending a disconnect message to client
                                 client_socket.send(flashpoint_protocol.create_proto_msg(
                                     'DS', flashpoint_protocol.create_proto_data()))
-                                print('sent stop')
+                                logging.debug('Sent message to client: DS')
+
+                                # informing the admin server that the client disconnected
+                                admin_socket.send(flashpoint_protocol.create_proto_msg(
+                                    'DC', flashpoint_protocol.create_proto_data(ADMIN_IP.encode(),
+                                                                                str(port).encode())))
+                                logging.debug('Sent message to admin: DC')
+
+                                # updating the var to inform that the stop message was sent
                                 stop = True
+
                         except (BrokenPipeError, ConnectionResetError) as e:
-                            print(f"[!] Error sending stop message to admin: {e}")
+                            logging.error(f"Error sending stop message to admin: {e}")
+                            print(f"Error sending stop message to admin: {e}")
+
+                    # checking if I got an error message
+                    elif flashpoint_protocol.get_func(stop_msg) == 'ER':
+                        logging.debug('Got error message')
+                        break
+
                 except Exception as e:
-                    print(f"[!] Error while handling stop message: {e}")
+                    logging.error(f"Error while handling stop message: {e}")
+                    print(f"Error while handling stop message: {e}")
                     break
 
             # If the socket is still open, send the chunk
@@ -109,107 +175,150 @@ def file_break(movie_path, client_socket, admin_socket, frame=0):
                             'MC',
                             flashpoint_protocol.create_proto_data(str(i).encode(), encoded)
                         )
-                        client_socket.send(msg)  # Try sending chunk if the socket is open
+                        client_socket.send(msg)
+                        logging.debug('Sent to client: MC')
+
                 except (BrokenPipeError, ConnectionResetError) as e:
-                    print(f"[!] Client disconnected while sending chunk {i}: {e}")
+                    print(f"Client disconnected while sending chunk {i}: {e}")
                     break
 
+            # removing all the temp files
             if os.path.exists(full_path):
                 os.remove(full_path)
 
+    # if the server sent all the chunks and the client didn't stop in the middle, wait for disconnect from client
     if not stop:
         stop_msg = flashpoint_protocol.get_proto_msg(client_socket)
-        print('got: ')
-        print(stop_msg)
+
         if flashpoint_protocol.get_func(stop_msg) == 'PM':
             send = False
             username = flashpoint_protocol.get_data(stop_msg)
             password = flashpoint_protocol.get_data(stop_msg, 2)
             movie = flashpoint_protocol.get_data(stop_msg, 3)
             frame = flashpoint_protocol.get_data(stop_msg, 4)
-            if int(frame.decode()) > movie_len - 3:
-                frame = '0'.encode()
+
+            if int(frame.decode()) >= movie_len - 1:
+                frame = '-1'.encode()
             data = flashpoint_protocol.create_proto_data(username, password, movie, frame)
             msg = flashpoint_protocol.create_proto_msg('UD', data)
             try:
                 if admin_socket:
-                    print("hello admin")
+                    # sending UD message to admin server
                     admin_socket.send(msg)
-                    print('sent to admin')
+
+                    # sending a disconnect message to client
                     client_socket.send(flashpoint_protocol.create_proto_msg(
                         'DS', flashpoint_protocol.create_proto_data()))
-                    print('sent stop')
+
+                    # informing the admin server that the client disconnected
+                    admin_socket.send(flashpoint_protocol.create_proto_msg(
+                        'DC', flashpoint_protocol.create_proto_data(ADMIN_IP.encode(),
+                                                                    str(port).encode())))
+
+                    # updating the var to inform that the stop message was sent
                     stop = True
+
             except (BrokenPipeError, ConnectionResetError) as e:
-                print(f"[!] Error sending stop message to admin: {e}")
+                print(f"Error sending stop message to admin: {e}")
 
 
+def handle_thread(admin_sock, client_socket, client_address, my_port, db):
+    """
 
-def handle_thread(admin_sock, client_socket, client_address, my_port):
+    :param admin_sock: the admin server's socket
+    :param client_socket: the client's socket
+    :param client_address: the client's address
+    :param my_port: the media server port
+    :type my_port: int
+    :param db: an ADV database containing the movie files paths
+    :type db: AdvDB
+    :return:
+    """
+
+    # checking that the server got the correct first func
     first_msg = flashpoint_protocol.get_proto_msg(client_socket)
+    logging.debug('Got a message from client: ' + flashpoint_protocol.get_func(first_msg))
     while flashpoint_protocol.get_func(first_msg) != FIRST_FUNC:
+        logging.debug('Got a message from client: ' + flashpoint_protocol.get_func(first_msg))
         first_msg = flashpoint_protocol.get_proto_msg(client_socket)
-    m_name = flashpoint_protocol.get_data(first_msg)
+
+    m_name = flashpoint_protocol.get_data(first_msg).decode()
     frame = flashpoint_protocol.get_data(first_msg, 2)
+
     if frame == b'':
         frame = 0
+
     else:
         frame = int(frame.decode())
-    msg = flashpoint_protocol.create_proto_msg('MR', flashpoint_protocol.create_proto_data(m_name))
-    admin_sock.send(msg)
-    ret_msg = flashpoint_protocol.get_proto_msg(admin_sock)
-    m_fpath = flashpoint_protocol.get_data(ret_msg).decode()
-    movie_q = ''
+
+    m_fpath = db.get_val(m_name)
+
     if m_fpath == '':
+        logging.error('Movie not found')
         client_socket.send('ERROR'.encode())
 
     else:
-        file_break(m_fpath, client_socket, admin_sock, frame)
+        file_break(m_fpath, client_socket, admin_sock, my_port, frame)
 
 
 def connect2admin():
+    """
+    the func connects to the admin server
+    :return: the admin server's socket
+    """
     try:
         main_server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         main_server_sock.connect((ADMIN_IP, ADMIN_PORT))
+        logging.debug("Connected to admin server.")
         print("Connected to admin server.")
 
-        # You can return the socket if you want to keep communicating with the main server
         return main_server_sock
 
     except Exception as e:
-        print("Failed to connect to main server:", e)
+        err_str = 'Failed to connect to admin server: ' + str(e)
+        logging.error(err_str)
+        print(err_str)
         return None
 
 
 def main():
+    # connecting to the admin server
     admin_sock = connect2admin()
     if not admin_sock:
         return
+
+    # setting a port
     port = random.randint(1024, 65535)
-    port = 2085
-    msg = flashpoint_protocol.create_proto_msg('CS', flashpoint_protocol.create_proto_data(ADMIN_IP.encode(),
+
+    # setting a database for the movie files locations
+    db = AdvDB(True, 'movie', MOVIE_DICT)
+
+    # sending server details to the database
+    msg = flashpoint_protocol.create_proto_msg('SD', flashpoint_protocol.create_proto_data(ADMIN_IP.encode(),
                                                                                            str(port).encode()))
     admin_sock.send(msg)
-    print('sent')
-    print(msg)
 
+    # connecting to a client
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         server_socket.bind((IP, port))
         server_socket.listen(QUEUE_SIZE)
-        sock_list = []
         while True:
             client_socket, client_address = server_socket.accept()
             print('connected')
-            sock_list.append(client_socket)
             thread = Thread(target=handle_thread,
-                            args=(admin_sock, client_socket, client_address, port))
+                            args=(admin_sock, client_socket, client_address, port, db))
             thread.start()
+
     except socket.error as err:
-        print('received socket exception - ' + str(err))
+        err_str = 'received socket exception: ' + str(err)
+        logging.error(err_str)
+        print(err_str)
+
     finally:
         server_socket.close()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(filename='media_server.log', level=logging.DEBUG)
     main()
