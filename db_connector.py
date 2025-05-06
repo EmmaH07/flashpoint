@@ -9,8 +9,8 @@ class DBConnection:
             self.__db = pymysql.connect(
                 host='127.0.0.1',
                 user='root',
-                password='password',
-                database='db',
+                password='FBaDb250739#',
+                database='flashpoint',
             )
             print('connected')
         except Exception as e:
@@ -64,8 +64,8 @@ class DBConnection:
             conn = pymysql.connect(
                 host='127.0.0.1',
                 user='root',
-                password='password',
-                database='db',
+                password='FBaDb250739#',
+                database='flashpoint',
             )
             cursor = conn.cursor()
             cursor.execute('SELECT movie_name, last_frame FROM seen_movies WHERE userID = %s', (user_id,))
