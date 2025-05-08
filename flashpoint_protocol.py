@@ -1,7 +1,8 @@
 import struct
+import base64
 
-LEGAL_FUNCS = ['LI', 'SU', 'AP','GM', 'DS', 'MR', 'CR', 'PM', 'LL', 'VU', 'IE', 'YM', 'PL', 'SA', 'MC', 'SD', 'UD',
-               'ML', 'DC']
+LEGAL_FUNCS = ['LI', 'SU', 'AP', 'GM', 'DS', 'MR', 'CR', 'PM', 'LL', 'VU', 'IE', 'YM', 'PL', 'SA', 'MC', 'SD', 'UD',
+               'ML', 'DC', 'AK', 'PK']
 
 
 def get_func(byte_msg):
@@ -35,13 +36,15 @@ def get_data(proto_msg, half_num=1):
     elif half_num > 4:
         half_num = 4
     ret_data = data.split(b'^')[half_num-1]
-    return ret_data
+    return base64.b64decode(ret_data)
 
 
-def get_proto_msg(client_socket):
+def get_aes_msg(client_socket, aes_obj):
     """
     the func waits for a message from the socket and receives it using the packed message length.
     :param client_socket: the socket from which the message should come.
+    :param aes_obj:
+    :type aes_obj:
     :return: the message from the socket.
     """
     packed_len = client_socket.recv(4)
@@ -51,30 +54,21 @@ def get_proto_msg(client_socket):
     msg = client_socket.recv(msg_len)
     while len(msg) < msg_len:
         msg += client_socket.recv(msg_len - len(msg))
-    full_msg = packed_len + msg
-    if get_func(full_msg) not in LEGAL_FUNCS:
-        full_msg = error_msg()
-    return full_msg
+    msg = aes_obj.decrypt_data(msg)
+    if get_func(msg) not in LEGAL_FUNCS:
+        msg = create_aes_msg('ER', create_proto_data(), aes_obj)
+    return msg
 
 
-def error_msg():
-    """
-    The func creates an error message.
-    :return: an error message written by protocol.
-    """
-    msg_str = b'@ER|^^^'
-    packed_length = struct.pack('>I', len(msg_str))
-    msg_str = packed_length + msg_str
-    return msg_str
-
-
-def create_proto_msg(func, data):
+def create_aes_msg(func, data, aes_obj):
     """
     A func that creates a message by protocol.
     :param func: the function's name
     :type func: str
     :param data: the needed data to send
     :type data: bytes
+    :param aes_obj:
+    :type aes_obj:
     :return: a message in bytes written by protocol
     """
     msg_str = '@' + func + '|'
@@ -85,10 +79,77 @@ def create_proto_msg(func, data):
     if b'^' not in msg_data:
         msg_data = b'^^^'
     msg_str += msg_data
+    if func not in LEGAL_FUNCS:
+        msg_str = b'@ER|^^^'
+
+    msg_str = aes_obj.encrypt_data(msg_str)
     packed_length = struct.pack('>I', len(msg_str))
     msg = packed_length + msg_str
+
+    return msg
+
+
+def create_rsa_msg(func, data, rsa_obj, pub_key=None):
+    if b'^' not in data:
+        data = b'^^^'
+
+    msg_str = b'@' + func.encode() + b'|' + data
     if func not in LEGAL_FUNCS:
-        msg = error_msg()
+        msg_str = b'@ER|^^^'
+
+    if pub_key:
+        msg_str = rsa_obj.encrypt_with_pub_key(msg_str, pub_key)
+
+    else:
+        msg_str = rsa_obj.encrypt(msg_str)
+
+    packed_length = struct.pack('>I', len(msg_str))
+    msg = packed_length + msg_str
+    return msg
+
+
+def get_rsa_msg(client_socket, rsa_obj):
+    packed_len = client_socket.recv(4)
+    while len(packed_len) < 4:
+        packed_len += client_socket.recv(4-len(packed_len))
+
+    msg_len = struct.unpack('>I', packed_len)[0]
+    msg = client_socket.recv(msg_len)
+    while len(msg) < msg_len:
+        msg += client_socket.recv(msg_len - len(msg))
+    msg = rsa_obj.decrypt(msg)
+    if get_func(msg) not in LEGAL_FUNCS:
+        msg = create_aes_msg('ER', create_proto_data(), rsa_obj)
+    return msg
+
+
+def create_proto_msg(func, data):
+    if b'^' not in data:
+        data = b'^^^'
+
+    msg_str = b'@' + func.encode() + b'|' + data
+    if func not in LEGAL_FUNCS:
+        msg_str = b'@ER|^^^'
+
+    packed_length = struct.pack('>I', len(msg_str))
+    msg = packed_length + msg_str
+    return msg
+
+
+def get_proto_msg(client_socket):
+    packed_len = client_socket.recv(4)
+    while len(packed_len) < 4:
+        packed_len += client_socket.recv(4 - len(packed_len))
+
+    msg_len = struct.unpack('>I', packed_len)[0]
+    msg = client_socket.recv(msg_len)
+
+    while len(msg) < msg_len:
+        msg += client_socket.recv(msg_len - len(msg))
+
+    if get_func(msg) not in LEGAL_FUNCS:
+        msg = create_proto_msg('ER', create_proto_data())
+
     return msg
 
 
@@ -111,5 +172,6 @@ def create_proto_data(data1=b'', data2=b'', data3=b'', data4=b''):
         data2.encode()
     if isinstance(data3, str):
         data3.encode()
-    msg = data1 + b'^' + data2 + b'^' + data3 + b'^' + data4
+    msg = (base64.b64encode(data1) + b'^' + base64.b64encode(data2) + b'^' + base64.b64encode(data3) + b'^' +
+           base64.b64encode(data4))
     return msg
