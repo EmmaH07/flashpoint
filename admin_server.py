@@ -6,8 +6,10 @@ import flashpoint_protocol
 from db_connector import DBConnection
 from PIL import Image
 import io
-import base64
+import logging
 from adv_db import AdvDB
+from rsa import RsaEncryption
+from aes import AesEncryption
 
 FIRST_FUNCS = ['SU', 'LI', 'SD']
 IP = '0.0.0.0'
@@ -36,8 +38,6 @@ def login(login_msg, db):
     """
     username = flashpoint_protocol.get_data(login_msg, 1).decode()
     password = flashpoint_protocol.get_data(login_msg, 2).decode()
-    print('username: ' + username)
-    print('password: ' + password)
     return db.user_exists(username, password)
 
 
@@ -57,6 +57,7 @@ def signup(signup_msg, db):
     if not ret_ans:
         write_lock.acquire()
         db.add_user(username, password)
+        logging.debug(f"added user({username, password} to database")
         write_lock.release()
     return not ret_ans
 
@@ -130,44 +131,71 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
     # creating a MySQL database connection
     db = DBConnection()
 
-    # waiting for the first message and making sure the command in it is the correct one for the start
-    ret_msg = flashpoint_protocol.get_proto_msg(client_socket)
-    while flashpoint_protocol.get_func(ret_msg) not in FIRST_FUNCS:
-        ret_msg = flashpoint_protocol.get_proto_msg(client_socket)
-    func = flashpoint_protocol.get_func(ret_msg)
+    # setting RSA object and public key
+    rsa_obj = RsaEncryption()
+    pub_key = rsa_obj.get_pub_key()
+
+    # sending first message
+    first_msg = flashpoint_protocol.create_proto_msg('PK', flashpoint_protocol.create_proto_data(pub_key))
+    client_socket.send(first_msg)
+    logging.debug(f"{client_address}: sent PK message to client")
+
+    # waiting for 'AES Key' message and making sure the command in it is the correct one for the start
+    key_msg = flashpoint_protocol.get_rsa_msg(client_socket, rsa_obj)
+    while flashpoint_protocol.get_func(key_msg) != 'AK':
+        key_msg = flashpoint_protocol.get_rsa_msg(client_socket, rsa_obj)
+
+    key = flashpoint_protocol.get_data(key_msg)
+    print(key)
+    aes_obj = AesEncryption(key)
 
     while cont_connection:
         # waiting for messages so long no error was raised
 
+        # checking if an error was raised or if the client disconnected before waiting for a message
+        ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+        func = flashpoint_protocol.get_func(ret_msg)
+        logging.debug(f"{client_address}: got {func} message from client")
+
         if func == 'LI':
             # handling login request
             while not login(ret_msg, db) and flashpoint_protocol.get_func(ret_msg) == 'LI':
-                msg = flashpoint_protocol.create_proto_msg('VU', flashpoint_protocol.create_proto_data(b'False'))
+                msg = flashpoint_protocol.create_aes_msg('VU', flashpoint_protocol.create_proto_data(b'False'),
+                                                         aes_obj)
                 client_socket.send(msg)
-                ret_msg = flashpoint_protocol.get_proto_msg(client_socket)
+                logging.debug(f"{client_address}: sent VU to client")
+                ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
 
             if flashpoint_protocol.get_func(ret_msg) != 'LI':
-                msg = flashpoint_protocol.error_msg()
+                msg = flashpoint_protocol.create_aes_msg('ER', flashpoint_protocol.create_proto_data(), aes_obj)
                 client_socket.send(msg)
+                logging.debug(f"{client_address}: sent ER to client while trying to login")
 
             else:
-                msg = flashpoint_protocol.create_proto_msg('VU', flashpoint_protocol.create_proto_data(b'True'))
+                msg = flashpoint_protocol.create_aes_msg('VU', flashpoint_protocol.create_proto_data(b'True'),
+                                                         aes_obj)
                 client_socket.send(msg)
+                logging.debug(f"{client_address}: sent VU to client")
 
         if func == 'SU':
             # handling sign-up request
             while not signup(ret_msg, db) and flashpoint_protocol.get_func(ret_msg) == 'SU':
-                msg = flashpoint_protocol.create_proto_msg('IE', flashpoint_protocol.create_proto_data(b'True'))
+                msg = flashpoint_protocol.create_aes_msg('IE', flashpoint_protocol.create_proto_data(b'True'),
+                                                         aes_obj)
                 client_socket.send(msg)
-                ret_msg = flashpoint_protocol.get_proto_msg(client_socket)
+                logging.debug(f"{client_address}: sent IE to client")
+                ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
 
             if flashpoint_protocol.get_func(ret_msg) != 'SU':
-                msg = flashpoint_protocol.error_msg()
+                msg = flashpoint_protocol.create_aes_msg('ER', flashpoint_protocol.create_proto_data(), aes_obj)
                 client_socket.send(msg)
+                logging.debug(f"{client_address}: sent ER to client while trying to sign-up")
 
             else:
-                msg = flashpoint_protocol.create_proto_msg('IE', flashpoint_protocol.create_proto_data(b'False'))
+                msg = flashpoint_protocol.create_aes_msg('IE', flashpoint_protocol.create_proto_data(b'False'),
+                                                         aes_obj)
                 client_socket.send(msg)
+                logging.debug(f"{client_address}: sent IE to client")
 
         if func == 'GM':
             # handling a 'get movies' request
@@ -175,35 +203,39 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
                                      flashpoint_protocol.get_data(ret_msg, 2))
             if user_id:
                 m_data = get_movie_lst(user_id, db)
-                client_socket.send(flashpoint_protocol.create_proto_msg('LL',
-                                                                        flashpoint_protocol.create_proto_data(
-                                                                            str(len(m_data)).encode())))
+                msg = flashpoint_protocol.create_aes_msg('LL', flashpoint_protocol.create_proto_data(
+                                                                            str(len(m_data)).encode()), aes_obj)
+                client_socket.send(msg)
+                logging.debug(f"{client_address}: sent LL to client")
+
                 for i in range(len(m_data)):
                     img = poster_db.get_val(m_data[i][0])
                     img = image2bytes(img)
-                    encoded_data = base64.b64encode(img)
-                    msg = flashpoint_protocol.create_proto_msg('YM',
-                                                               flashpoint_protocol.create_proto_data(
+                    msg = flashpoint_protocol.create_aes_msg('YM', flashpoint_protocol.create_proto_data(
                                                                    m_data[i][0].encode(), str(m_data[i][1]).encode(),
-                                                                   encoded_data))
+                                                                   img), aes_obj)
                     client_socket.send(msg)
+                    logging.debug(f"{client_address}: sent YM to client")
 
             else:
-                client_socket.send(flashpoint_protocol.error_msg())
+                client_socket.send(flashpoint_protocol.create_aes_msg('ER',
+                                                                      flashpoint_protocol.create_proto_data(), aes_obj))
+                logging.debug(f"{client_address}: sent ER to client while trying to send movie posters")
 
         if func == 'AP':
             # handling an 'all posters' request
             posters = get_poster_lst(poster_db)
-            client_socket.send(flashpoint_protocol.create_proto_msg('LL',
-                                                                    flashpoint_protocol.create_proto_data(
-                                                                        str(len(posters)).encode())))
+            msg = flashpoint_protocol.create_aes_msg('LL', flashpoint_protocol.create_proto_data(
+                                                                        str(len(posters)).encode()), aes_obj)
+            client_socket.send(msg)
+            logging.debug(f"{client_address}: sent LL to client")
+
             for key in posters:
                 poster_bytes = image2bytes(posters[key])
-                encoded_data = base64.b64encode(poster_bytes)
-                msg = flashpoint_protocol.create_proto_msg('PL',
-                                                           flashpoint_protocol.create_proto_data(
-                                                               key.encode(), encoded_data))
+                msg = flashpoint_protocol.create_aes_msg('PL', flashpoint_protocol.create_proto_data(
+                                                               key.encode(), poster_bytes), aes_obj)
                 client_socket.send(msg)
+                logging.debug(f"{client_address}: sent PL to client")
 
         if func == 'SD':
             # handling 'server details' command
@@ -211,6 +243,7 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
             port = flashpoint_protocol.get_data(ret_msg, 2).decode()
             sock_details = ip + ':' + port
             socket_db.set_val(sock_details, 0)
+            logging.debug(f"added {sock_details} to database")
 
         if func == 'CR':
             # handling a connection request
@@ -220,8 +253,9 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
                 ip = server_key.split(':')[0]
                 port = server_key.split(':')[1]
                 msg_data = flashpoint_protocol.create_proto_data(ip.encode(), port.encode())
-                msg = flashpoint_protocol.create_proto_msg('SA', msg_data)
+                msg = flashpoint_protocol.create_aes_msg('SA', msg_data, aes_obj)
                 client_socket.send(msg)
+                logging.debug(f"{client_address}: sent SA to client")
                 server_num = server_dict[server_key]
                 server_num += 1
                 socket_db.set_val(server_key, server_num)
@@ -260,11 +294,6 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
             # an error was raised
             cont_connection = False
 
-        if cont_connection:
-            # checking if an error was raised or if the client disconnected before waiting for a message
-            ret_msg = flashpoint_protocol.get_proto_msg(client_socket)
-            func = flashpoint_protocol.get_func(ret_msg)
-
 
 def main():
     # creating databases to hold the poster file paths and the socket info.
@@ -282,10 +311,12 @@ def main():
                             args=(client_socket, client_address, poster_db, socket_db))
             thread.start()
     except socket.error as err:
-        print('received socket exception - ' + str(err))
+        logging.error(f"received socket exception: {err}")
     finally:
         server_socket.close()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(filename='admin_server.log', level=logging.DEBUG)
+    logging.getLogger("PIL").setLevel(logging.ERROR)
     main()
