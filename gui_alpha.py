@@ -6,9 +6,13 @@ import subprocess
 import tkinter as tk
 from queue import Queue
 from tkinter import *
+from tkinter import filedialog
 import time
 import threading
 import logging
+import json
+import os
+import tempfile
 
 from PIL import Image, ImageTk
 from PIL import ImageFile
@@ -472,7 +476,7 @@ def display_movies(client_socket, aes_obj, username, password, counter=0):
             frame = int(frame.decode())
             # creating a button for each movie
             movie_button = Button(home_pg_frame, text=title, command=lambda t=title.decode(): start_watch
-                                  (client_socket, aes_obj, t, username, password, frame),
+            (client_socket, aes_obj, t, username, password, frame),
                                   activebackground="black",
                                   activeforeground="white",
                                   anchor="center",
@@ -697,7 +701,19 @@ def login_submit(client_socket, aes_obj):
                 err_txt_label.place(y=700, x=575)
                 err_txt_label.after(3000, err_txt_label.destroy)
             else:
-                home_screen(client_socket, aes_obj, username, password)
+                data = flashpoint_protocol.create_proto_data(username.encode(), password.encode())
+                print(data)
+                msg = flashpoint_protocol.create_aes_msg('IA', data, aes_obj)
+                print(msg)
+                client_socket.send(msg)
+                logging.debug('sent IA to admin')
+                ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+                logging.debug(f"got {flashpoint_protocol.get_func(ret_msg)} from admin")
+                is_admin = flashpoint_protocol.get_data(ret_msg).decode()
+                if is_admin == 'True':
+                    admin_screen(client_socket, aes_obj)
+                else:
+                    home_screen(client_socket, aes_obj, username, password)
         else:
             # in case of an error message, displaying error screen
             logging.debug("got ER from admin while trying to login")
@@ -761,6 +777,250 @@ def signup_submit(client_socket, aes_obj):
             # in case of an error message, displaying error screen
             logging.debug(f"got ER from admin while trying to sign up")
             create_err_pg()
+
+
+def get_video_duration(movie_path, chunk_duration=10):
+    """
+    the func checks how many 10 seconds chunks is the movie made of
+    :param movie_path: the movie's file path
+    :type movie_path: str
+    :param chunk_duration: what is the amount of seconds each chunk is made of
+    :type chunk_duration: int
+    :return: the amount of 10 seconds chunks the movie contains
+    """
+    result = subprocess.run([
+        'ffprobe',
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'json',
+        movie_path
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    info = json.loads(result.stdout)
+    duration = float(info['format']['duration'])
+    movie_len = duration // chunk_duration
+    if duration % chunk_duration > 0:
+        movie_len += 1
+    return int(movie_len)
+
+
+def send_file(client_socket, aes_obj, file_path, img_path, movie_name):
+    # Send movie name
+    data = flashpoint_protocol.create_proto_data(movie_name.encode())
+    msg = flashpoint_protocol.create_aes_msg('FN', data, aes_obj)
+    client_socket.send(msg)
+    print(f"Sending file: {file_path}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Use FFmpeg to split the video into proper MPEG-TS segments
+        output_pattern = os.path.join(tmpdir, "chunk%03d.ts")
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-i", file_path,
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-x264-params", "keyint=25:min-keyint=25",  # ensure keyframe every second if 25fps
+            "-c:a", "aac",
+            "-ar", "44100",
+            "-ac", "2",
+            "-f", "segment",
+            "-segment_time", "10",
+            "-force_key_frames", "expr:gte(t,n_forced*10)",  # force keyframe every 10s
+            "-reset_timestamps", "1",
+            "-map", "0",
+            "-movflags", "+faststart",
+            os.path.join(tmpdir, "chunk_%03d.ts")
+        ]
+
+        result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            logging.error("FFmpeg splitting failed:\n%s", result.stderr.decode())
+            return
+
+        # Collect and sort chunks
+        chunk_files = sorted(
+            [f for f in os.listdir(tmpdir) if f.endswith(".ts")]
+        )
+        file_len = len(chunk_files)
+
+        # Send number of chunks
+        data = flashpoint_protocol.create_proto_data(str(file_len).encode())
+        msg = flashpoint_protocol.create_aes_msg('FL', data, aes_obj)
+        client_socket.send(msg)
+
+        # Encrypt and send each chunk
+        for i, chunk_filename in enumerate(chunk_files):
+            full_path = os.path.join(tmpdir, chunk_filename)
+            try:
+                with open(full_path, "rb") as f:
+                    chunk_data = f.read()
+                    proto_data = flashpoint_protocol.create_proto_data(chunk_data)
+                    msg = flashpoint_protocol.create_aes_msg('FC', proto_data, aes_obj)
+                    client_socket.send(msg)
+                    logging.debug(f'Sent chunk {i} to server')
+            except (BrokenPipeError, ConnectionResetError) as e:
+                print(f"Client disconnected while sending chunk {i}: {e}")
+                break
+
+
+def browse_file():
+    path = filedialog.askopenfilename(
+        title="Select a file",
+        filetypes=[("Video Files", "*.mp4 *.ts"), ("All Files", "*.*")]
+    )
+    if path:
+        selected_path.set(path)
+
+
+def file_submit(client_socket, aes_obj):
+    file_path = selected_path.get()
+    img_path = image_path.get()
+    movie_name = name_box.get()
+    if file_path and img_path and movie_name:
+        print(f"Submitting {file_path} with poster {img_path} and name {movie_name}")
+        run_send_file(client_socket, aes_obj, file_path, img_path, movie_name)
+    else:
+        print("Missing file or movie name")
+
+
+def run_send_file(client_socket, aes_obj, file_path, img_path, movie_name):
+    thread = threading.Thread(
+        target=send_file,
+        args=(client_socket, aes_obj, file_path, img_path, movie_name),
+        daemon=True  # dies when the main program exits
+    )
+    thread.start()
+
+
+def choose_file():
+    global selected_path, file_path_label
+    path = filedialog.askopenfilename(
+        title="Select a file",
+        filetypes=[("Video Files", "*.mp4 *.ts"), ("All Files", "*.*")]
+    )
+    if path:
+        selected_path.set(path)
+        file_path_label.config(text=path)
+
+
+def choose_image():
+    global image_path, img_path_label
+    path = filedialog.askopenfilename(
+        title="Select an image",
+        filetypes=[("Image Files", "*.jpg *.jpeg *.png *.gif"), ("All Files", "*.*")]
+    )
+    if path:
+        image_path.set(path)
+        img_path_label.config(text=path)
+
+
+def open_plus_window(client_socket, aes_obj):
+    global name_box, selected_path, file_path_label
+
+    plus_win = tk.Toplevel(win)
+    plus_win.title("Add Movie Window")
+    plus_win.geometry("800x400")
+    plus_win.transient(win)
+    plus_win.grab_set()
+
+    # Movie name entry
+    name_box = Entry(plus_win)
+    name_box.place(x=120, y=85)
+    name_box.config(font=('Arial Narrow', 30), fg='#fcba03')
+    name_box.insert(0, 'Movie Name')
+
+    # StringVar to hold the selected file path
+    selected_path = StringVar()
+    image_path = StringVar()
+
+    # Button to browse for a file
+    browse_button = Button(
+        plus_win, text='Choose File',
+        command=choose_file,
+        bg="#fcba03", fg="white",
+        font=("Arial Narrow", 16),
+        width=11
+    )
+    browse_button.place(x=200, y=220)
+
+    # Label to show the selected file
+    file_path_label = Label(
+        plus_win, text="No file selected",
+        font=("Arial", 10), wraplength=500, justify="left"
+    )
+    file_path_label.place(x=200, y=260)
+
+    # Image browse button
+    image_button = Button(
+        plus_win, text='Choose Image',
+        command=choose_image,
+        bg="#03a9fc", fg="white",
+        font=("Arial Narrow", 16),
+        width=11
+    )
+    image_button.place(x=450, y=220)
+
+    # Label to show the selected image path
+    image_path_label = Label(
+        plus_win, text="No image selected",
+        font=("Arial", 10), wraplength=500, justify="left"
+    )
+    image_path_label.place(x=450, y=260)
+
+    # Submit button
+    submit_button = Button(
+        plus_win, text='Submit',
+        command=lambda: file_submit(client_socket, aes_obj),
+        activebackground="#bf8e04",
+        activeforeground="white",
+        bd=3, bg="#fcba03", fg="white",
+        font=("Arial Narrow", 18),
+        width=11
+    )
+    submit_button.place(x=200, y=320)
+
+
+def open_remove_window(client_socket, aes_obj):
+    global movie_name_box
+    new_win = tk.Toplevel(win)
+    new_win.title("Remove Movie Window")
+    new_win.geometry("800x400")
+    new_win.transient(win)  # Keep it on top of the main window
+    new_win.grab_set()  # Make it modal (blocks interaction with main)
+
+    movie_name_box = Entry(new_win)
+    movie_name_box.place(x=120, y=85)
+    movie_name_box.config(font=('Arial Narrow', 30))
+    movie_name_box.insert(0, 'Movie Name')
+    movie_name_box.config(fg='#fcba03')
+
+    # setting submit button
+    submit_button = Button(new_win, text='Submit', command=lambda: remove_submit(client_socket, aes_obj),
+                           activebackground="#bf8e04",
+                           activeforeground="white",
+                           anchor="center",
+                           bd=3,
+                           bg="#fcba03",
+                           cursor="hand2",
+                           disabledforeground="gray",
+                           fg="white",
+                           font=("Arial Narrow", 18),
+                           width=11)
+    submit_button.place(x=200, y=150)
+
+
+def remove_submit(client_socket, aes_obj):
+    global movie_name_box
+    movie_name = movie_name_box.get()
+    data = flashpoint_protocol.create_proto_data(movie_name.encode())
+    msg = flashpoint_protocol.create_aes_msg('RM', data, aes_obj)
+    client_socket.send(msg)
+    logging.debug('sent RM to admin')
+
+
+def wait_for_remove(client_socket, aes_obj):
+    rm_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+    logging.debug(f"got {flashpoint_protocol.get_func(rm_msg)} from admin")
 
 
 def down(counter, username, password, client_socket, aes_obj):
@@ -980,6 +1240,15 @@ def home_screen(client_socket, aes_obj, username, password, counter=0):
     current_frame = home_pg_frame
     home_pg_frame.pack()
     create_home_pg(client_socket, aes_obj, username, password, counter)
+
+
+def admin_screen(client_socket, aes_obj):
+    global current_frame, admin_frame
+    if current_frame:
+        current_frame.pack_forget()  # hide current frame
+    current_frame = admin_frame
+    admin_frame.pack()
+    create_admin_screen(client_socket, aes_obj)
 
 
 def err_screen():
@@ -1272,7 +1541,7 @@ def create_lib_pg(client_socket, aes_obj, username, password, counter=0):
     :type counter: int
     :return:
     """
-    global lib_frame, library_bg, poster_lst
+    global lib_frame, poster_lst
 
     # setting the background
     bg_label = Label(lib_frame, image=library_bg)
@@ -1362,6 +1631,58 @@ def create_lib_pg(client_socket, aes_obj, username, password, counter=0):
     lib_frame.pack()
 
 
+def create_admin_screen(client_socket, aes_obj):
+    global admin_frame
+
+    # setting the background
+    bg_label = Label(admin_frame, image=library_bg)
+    bg_label.place(x=0, y=0)
+
+    # setting 'change to log-in screen' button
+    change_2login = Button(admin_frame, text='Log-out', command=lambda: login_screen(client_socket, aes_obj),
+                           activebackground="#7d0101",
+                           activeforeground="#fcba03",
+                           anchor="center",
+                           bd=3,
+                           bg="#c00000",
+                           cursor="hand2",
+                           disabledforeground="#fcba03",
+                           fg="#fcba03",
+                           font=("Arial Narrow", 18),
+                           width=11)
+    change_2login.place(x=1200, y=10)
+
+    # setting a button to remove a movie
+    remove_button = Button(admin_frame, image=remove_img,
+                           command=lambda: open_remove_window(client_socket, aes_obj),
+                           activebackground="#7d0101",
+                           activeforeground="#fcba03",
+                           anchor="center",
+                           bd=3,
+                           bg="#c00000",
+                           cursor="hand2",
+                           disabledforeground="#fcba03",
+                           fg="#fcba03",
+                           font=("Arial Narrow", 30))
+    remove_button.place(x=715, y=300)
+
+    # setting a button to add a movie
+    plus_button = Button(admin_frame, image=plus_img,
+                         command=lambda: open_plus_window(client_socket, aes_obj),
+                         activebackground="#7d0101",
+                         activeforeground="#fcba03",
+                         anchor="center",
+                         bd=3,
+                         bg="#c00000",
+                         cursor="hand2",
+                         disabledforeground="#fcba03",
+                         fg="#fcba03",
+                         font=("Arial Narrow", 30))
+    plus_button.place(x=450, y=300)
+
+    admin_frame.pack()
+
+
 def create_err_pg():
     """
     creating error frame widgets
@@ -1391,6 +1712,8 @@ next_img = PhotoImage(file='gui_images/next.png')
 prev_img = PhotoImage(file='gui_images/prev.png')
 lib_img = PhotoImage(file='gui_images/lib.png')
 home_img = PhotoImage(file='gui_images/home.png')
+remove_img = PhotoImage(file='gui_images/minus.png')
+plus_img = PhotoImage(file='gui_images/plus.png')
 
 # set background images
 start_bg = PhotoImage(file='gui_images/start_bg.png')
@@ -1408,6 +1731,7 @@ signup_frame = Frame(win, bg='black', height=768, width=1365)
 home_pg_frame = Frame(win, bg='black', height=768, width=1365)
 lib_frame = Frame(win, bg='black', height=768, width=1365)
 watch_frame = Frame(win, bg='black', height=768, width=1365)
+admin_frame = Frame(win, bg='black', height=768, width=1365)
 err_frame = Frame(win, bg='black', height=768, width=1365)
 
 # setting the login frame as default
@@ -1429,6 +1753,13 @@ login_username_box = Entry(login_frame)
 login_password_box = Entry(login_frame)
 signup_username_box = Entry(signup_frame)
 signup_password_box = Entry(signup_frame)
+name_box = None
+
+# set label and StringVar for plus window
+selected_path = StringVar()
+image_path = StringVar()
+file_path_label = None
+img_path_label = None
 
 # set sliding text
 txt = 'flashpoint.io'
