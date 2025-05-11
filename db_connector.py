@@ -1,5 +1,6 @@
 import mysql.connector
 import pymysql
+import hashlib
 
 
 class DBConnection:
@@ -141,15 +142,23 @@ class DBConnection:
             self.__db.commit()
         cursor.close()
 
+    def is_admin(self, username, password):
+        cursor = self.__db.cursor()
+        sql = 'SELECT admin FROM users WHERE username = %s AND user_password = %s'
+        cursor.execute(sql, (username, password))
+        is_admin = cursor.fetchone()[0]
+        res = False
+        if is_admin == 1:
+            res = True
+        return res
+
 
 if __name__ == '__main__':
     db = DBConnection()
-    if not db:
-        print('failed')
-    else:
-        print(db.movie_exists('The Flash'))
-        print(db.fetch_movie('The Flash'))
-        print('movie_lst:' + str(db.get_movie_lst(1)))
-        print(db.get_poster_fpath('Superman 2025'))
-        print('poster list: ')
-        print(db.get_all_posters())
+    print(db.movie_exists('The Flash'))
+    print(db.fetch_movie('The Flash'))
+    print('movie_lst:' + str(db.get_movie_lst(1)))
+    print(db.get_poster_fpath('Superman 2025'))
+    print('poster list: ')
+    print(db.get_all_posters())
+    print(db.is_admin('Username', str(hashlib.md5('Password'.encode()).hexdigest())))
