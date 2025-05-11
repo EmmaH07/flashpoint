@@ -5,6 +5,7 @@ import socket
 import subprocess
 import tempfile
 from threading import Thread
+import threading
 import logging
 import select
 
@@ -28,6 +29,7 @@ MOVIE_DICT = {'10 Things I Hate About You': 'movies/10things_trailer.mp4', 'Alad
               'Star Wars': 'movies/star_wars.mp4', 'Superman 1978': 'movies/superman1978.mp4',
               'Superman 2025': 'movies/superman2025.mp4', 'The Batman': 'movies/the_batman.mp4',
               'The Flash': 'movies/the_flash.mp4'}
+MOVIE_START_PATH = 'movies/'
 
 
 def handle_err(client_socket):
@@ -231,6 +233,100 @@ def file_break(movie_path, client_socket, client_aes, admin_socket, admin_aes, p
                 print("Error sending stop message to admin: " + str(e))
 
 
+def get_file(admin_sock, admin_aes, movie_name):
+    print('key:')
+    print(admin_aes.get_key())
+    # Get the file length (FL) message
+    len_msg = flashpoint_protocol.get_aes_msg(admin_sock, admin_aes)
+    func = flashpoint_protocol.get_func(len_msg)
+    print(f"Function received: {func}")
+
+    while func != 'FL':
+        len_msg = flashpoint_protocol.get_aes_msg(admin_sock, admin_aes)
+        func = flashpoint_protocol.get_func(len_msg)
+        print(f"Function received: {func}")
+
+    # Decode the file length
+    file_len = flashpoint_protocol.get_data(len_msg).decode()
+    print(f"File length: {file_len}")
+    total_chunks = int(file_len)
+
+    # Use a temporary directory to store the chunks and chunks.txt
+    with tempfile.TemporaryDirectory() as tmpdir:
+        chunk_paths = []
+
+        for i in range(total_chunks):
+            chunk_msg = flashpoint_protocol.get_aes_msg(admin_sock, admin_aes)
+            chunk_data = flashpoint_protocol.get_data(chunk_msg)
+            print(f"Function received: {flashpoint_protocol.get_func(chunk_msg)}")
+
+            chunk_filename = f"chunk_{i:03d}.ts"
+            chunk_path = os.path.join(tmpdir, chunk_filename)
+
+            with open(chunk_path, "wb") as f:
+                f.write(chunk_data)
+                f.flush()
+                os.fsync(f.fileno())
+
+            if not os.path.exists(chunk_path) or os.path.getsize(chunk_path) == 0:
+                raise RuntimeError(f"Failed to write chunk: {chunk_path}")
+
+            chunk_paths.append(chunk_path)
+            print(f"Written chunk {i} to {chunk_path} (size: {os.path.getsize(chunk_path)} bytes)")
+
+        # Write chunks.txt inside the temp directory
+        chunks_txt_path = os.path.join(tmpdir, "chunks.txt")
+        with open(chunks_txt_path, "w", newline="\n") as f:
+            for path in chunk_paths:
+                filename = os.path.basename(path)
+                f.write(f"file '{filename}'\n")
+
+        print(f"Contents of chunks.txt:\n{open(chunks_txt_path).read()}")
+
+        # Output path for the final movie
+        output_path = os.path.join("movies", f"{movie_name}.mp4").replace("\\", "/")
+
+        # FFmpeg command (run inside the temp directory)
+        ffmpeg_cmd = [
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", "chunks.txt",
+            "-c", "copy", "-bsf:a", "aac_adtstoasc",
+            output_path
+        ]
+
+        print("FFmpeg command:", " ".join(ffmpeg_cmd))
+
+        try:
+            subprocess.run(ffmpeg_cmd, cwd=tmpdir, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print(f"Movie saved to {output_path}")
+        except subprocess.CalledProcessError as e:
+            print("FFmpeg failed:")
+            print(e.stderr.decode() if e.stderr else str(e))
+
+
+def wait(admin_sock, admin_aes, movie_db):
+    rm_msg = flashpoint_protocol.get_aes_msg(admin_sock, admin_aes)
+    func = flashpoint_protocol.get_func(rm_msg)
+    logging.debug(f"got {func} from admin")
+
+    if func == 'RM':
+        movie_fpath = movie_db.get_val(flashpoint_protocol.get_data(rm_msg).decode())
+        if os.path.exists(movie_fpath):
+            os.remove(movie_fpath)
+            movie_db.delete_data(flashpoint_protocol.get_data(rm_msg).decode())
+    elif func == 'FN':
+        get_file(admin_sock, admin_aes, flashpoint_protocol.get_data(rm_msg).decode())
+
+
+def run_wait(admin_sock, admin_aes, movie_db):
+    thread = threading.Thread(
+        target=wait,
+        args=(admin_sock, admin_aes, movie_db),
+        daemon=True  # dies when the main program exits
+    )
+    thread.start()
+
+
 def handle_thread(admin_sock, admin_aes, client_socket, client_address, my_port, db):
     """
 
@@ -343,11 +439,13 @@ def main():
     # establishing encryption with admin
     admin_aes = start_encryption(admin_sock)
 
-    # setting a port
-    port = random.randint(1024, 65535)
-
     # setting a database for the movie files locations
     db = AdvDB(True, 'movie', MOVIE_DICT)
+
+    run_wait(admin_sock, admin_aes, db)
+
+    # setting a port
+    port = random.randint(1024, 65535)
 
     # sending server details to the database
     msg = flashpoint_protocol.create_aes_msg('SD', flashpoint_protocol.create_proto_data(
