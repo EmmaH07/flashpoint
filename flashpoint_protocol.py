@@ -2,7 +2,7 @@ import struct
 import base64
 
 LEGAL_FUNCS = ['LI', 'SU', 'AP', 'GM', 'DS', 'MR', 'CR', 'PM', 'LL', 'VU', 'IE', 'YM', 'PL', 'SA', 'MC', 'SD', 'UD',
-               'ML', 'DC', 'AK', 'PK']
+               'ML', 'DC', 'AK', 'PK', 'IA', 'VA', 'RM', 'FL', 'FC', 'FN']
 
 
 def get_func(byte_msg):
@@ -57,6 +57,7 @@ def get_aes_msg(client_socket, aes_obj):
     msg = aes_obj.decrypt_data(msg)
     if get_func(msg) not in LEGAL_FUNCS:
         msg = create_aes_msg('ER', create_proto_data(), aes_obj)
+        msg = aes_obj.decrypt_data(msg)
     return msg
 
 
