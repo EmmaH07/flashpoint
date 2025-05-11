@@ -10,6 +10,7 @@ import logging
 from adv_db import AdvDB
 from rsa import RsaEncryption
 from aes import AesEncryption
+from queue import Queue
 
 FIRST_FUNCS = ['SU', 'LI', 'SD']
 IP = '0.0.0.0'
@@ -25,6 +26,10 @@ POSTER_DICT = {'10 Things I Hate About You': 'posters/10things_trailer.png', 'Al
 
 # setting global lock variable
 write_lock = threading.Lock()
+read_lock = threading.Lock()
+
+# keeping track of media servers sockets
+media_sockets = []
 
 
 def login(login_msg, db):
@@ -124,8 +129,42 @@ def image2bytes(image_fpath):
     return image_bytes
 
 
+def broadcast(func, data):
+    d = flashpoint_protocol.create_proto_data(data)
+    for sock in media_sockets:
+        msg = flashpoint_protocol.create_aes_msg(func, d, sock[1])
+        sock[0].send(msg)
+        print(sock[1].get_key())
+
+
+def get_file(client_socket, aes_obj):
+    read_lock.acquire()
+    len_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+    read_lock.release()
+    print(len_msg)
+    file_len = flashpoint_protocol.get_data(len_msg)
+    broadcast('FL', file_len)
+    for i in range(int(file_len.decode())):
+        chunk_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+        chunk = flashpoint_protocol.get_data(chunk_msg)
+        print(flashpoint_protocol.get_func(chunk_msg))
+        broadcast('FC', chunk)
+
+
+def run_get_file(client_socket, aes_obj):
+    len_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+    print(len_msg)
+    file_len = flashpoint_protocol.get_data(len_msg)
+    broadcast('FL', file_len)
+    for i in range(int(file_len.decode())):
+        chunk_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+        chunk = flashpoint_protocol.get_data(chunk_msg)
+        print(flashpoint_protocol.get_func(chunk_msg))
+        broadcast('FC', chunk)
+
+
 def handle_thread(client_socket, client_address, poster_db, socket_db):
-    global write_lock
+    global write_lock, media_sockets
     cont_connection = True
 
     # creating a MySQL database connection
@@ -154,48 +193,42 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
 
         # checking if an error was raised or if the client disconnected before waiting for a message
         ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+        print(ret_msg)
         func = flashpoint_protocol.get_func(ret_msg)
         logging.debug(f"{client_address}: got {func} message from client")
 
         if func == 'LI':
             # handling login request
-            while not login(ret_msg, db) and flashpoint_protocol.get_func(ret_msg) == 'LI':
-                msg = flashpoint_protocol.create_aes_msg('VU', flashpoint_protocol.create_proto_data(b'False'),
-                                                         aes_obj)
-                client_socket.send(msg)
-                logging.debug(f"{client_address}: sent VU to client")
-                ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
-
-            if flashpoint_protocol.get_func(ret_msg) != 'LI':
-                msg = flashpoint_protocol.create_aes_msg('ER', flashpoint_protocol.create_proto_data(), aes_obj)
-                client_socket.send(msg)
-                logging.debug(f"{client_address}: sent ER to client while trying to login")
-
-            else:
+            if login(ret_msg, db):
                 msg = flashpoint_protocol.create_aes_msg('VU', flashpoint_protocol.create_proto_data(b'True'),
                                                          aes_obj)
-                client_socket.send(msg)
-                logging.debug(f"{client_address}: sent VU to client")
+            else:
+                msg = flashpoint_protocol.create_aes_msg('VU', flashpoint_protocol.create_proto_data(b'False'),
+                                                         aes_obj)
+            client_socket.send(msg)
+            logging.debug(f"{client_address}: sent VU to client")
 
         if func == 'SU':
             # handling sign-up request
-            while not signup(ret_msg, db) and flashpoint_protocol.get_func(ret_msg) == 'SU':
-                msg = flashpoint_protocol.create_aes_msg('IE', flashpoint_protocol.create_proto_data(b'True'),
-                                                         aes_obj)
-                client_socket.send(msg)
-                logging.debug(f"{client_address}: sent IE to client")
-                ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
-
-            if flashpoint_protocol.get_func(ret_msg) != 'SU':
-                msg = flashpoint_protocol.create_aes_msg('ER', flashpoint_protocol.create_proto_data(), aes_obj)
-                client_socket.send(msg)
-                logging.debug(f"{client_address}: sent ER to client while trying to sign-up")
-
-            else:
+            if signup(ret_msg, db):
                 msg = flashpoint_protocol.create_aes_msg('IE', flashpoint_protocol.create_proto_data(b'False'),
                                                          aes_obj)
-                client_socket.send(msg)
-                logging.debug(f"{client_address}: sent IE to client")
+
+            else:
+                msg = flashpoint_protocol.create_aes_msg('IE', flashpoint_protocol.create_proto_data(b'True'),
+                                                         aes_obj)
+            client_socket.send(msg)
+            logging.debug(f"{client_address}: sent IE to client")
+
+        if func == 'IA':
+            username = flashpoint_protocol.get_data(ret_msg, 1).decode()
+            password = flashpoint_protocol.get_data(ret_msg, 2).decode()
+            is_admin = db.is_admin(username, password)
+            data = flashpoint_protocol.create_proto_data(b'False')
+            if is_admin:
+                data = flashpoint_protocol.create_proto_data(b'True')
+            msg = flashpoint_protocol.create_aes_msg('VA', data, aes_obj)
+            client_socket.send(msg)
 
         if func == 'GM':
             # handling a 'get movies' request
@@ -243,6 +276,7 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
             port = flashpoint_protocol.get_data(ret_msg, 2).decode()
             sock_details = ip + ':' + port
             socket_db.set_val(sock_details, 0)
+            media_sockets.append((client_socket, aes_obj))
             logging.debug(f"added {sock_details} to database")
 
         if func == 'CR':
@@ -285,6 +319,16 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
                 if client_num < 0:
                     client_num = 0
             socket_db.set_val(sock_details, client_num)
+
+        if func == 'RM':
+            movie_name = flashpoint_protocol.get_data(ret_msg)
+            broadcast('RM', movie_name)
+            poster_db.delete_data(movie_name.decode())
+
+        if func == 'FN':
+            movie_name = flashpoint_protocol.get_data(ret_msg)
+            broadcast('FN', movie_name)
+            run_get_file(client_socket, aes_obj)
 
         if func == 'DS':
             # client disconnected
