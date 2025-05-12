@@ -804,10 +804,36 @@ def get_video_duration(movie_path, chunk_duration=10):
     return int(movie_len)
 
 
+def image2bytes(image_fpath):
+    """
+    converting a png image to bytes
+    :param image_fpath: the image file path
+    :type image_fpath: str
+    :return: the image from the file path in bytes
+    """
+    image_bytes = b''
+    if isinstance(image_fpath, bytes):
+        image_fpath.decode()
+    if os.path.exists(image_fpath):
+        image = Image.open(image_fpath)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        image_bytes = buffer.getvalue()
+        buffer.close()
+    return image_bytes
+
+
 def send_file(client_socket, aes_obj, file_path, img_path, movie_name):
     # Send movie name
     data = flashpoint_protocol.create_proto_data(movie_name.encode())
     msg = flashpoint_protocol.create_aes_msg('FN', data, aes_obj)
+    client_socket.send(msg)
+    print(f"Sending file: {file_path}")
+
+    # send movie poster
+    img_bytes = image2bytes(img_path)
+    data = flashpoint_protocol.create_proto_data(img_bytes)
+    msg = flashpoint_protocol.create_aes_msg('FI',data, aes_obj)
     client_socket.send(msg)
     print(f"Sending file: {file_path}")
 
@@ -896,7 +922,7 @@ def choose_file():
     global selected_path, file_path_label
     path = filedialog.askopenfilename(
         title="Select a file",
-        filetypes=[("Video Files", "*.mp4 *.ts"), ("All Files", "*.*")]
+        filetypes=[("Video Files", "*.mp4"), ("All Files", "*.*")]
     )
     if path:
         selected_path.set(path)
@@ -904,18 +930,18 @@ def choose_file():
 
 
 def choose_image():
-    global image_path, img_path_label
+    global image_path, image_path_label
     path = filedialog.askopenfilename(
         title="Select an image",
-        filetypes=[("Image Files", "*.jpg *.jpeg *.png *.gif"), ("All Files", "*.*")]
+        filetypes=[("Image Files", "*.png"), ("All Files", "*.*")]
     )
     if path:
         image_path.set(path)
-        img_path_label.config(text=path)
+        image_path_label.config(text=path)
 
 
 def open_plus_window(client_socket, aes_obj):
-    global name_box, selected_path, file_path_label
+    global name_box, selected_path, file_path_label,image_path_label,image_path
 
     plus_win = tk.Toplevel(win)
     plus_win.title("Add Movie Window")
@@ -1759,7 +1785,7 @@ name_box = None
 selected_path = StringVar()
 image_path = StringVar()
 file_path_label = None
-img_path_label = None
+image_path_label = None
 
 # set sliding text
 txt = 'flashpoint.io'
