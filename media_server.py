@@ -22,14 +22,7 @@ ADMIN_PORT = 3600
 QUEUE_SIZE = 10
 LEGAL_FUNC = ['MR']
 FIRST_FUNC = 'MR'
-MOVIE_DICT = {'10 Things I Hate About You': 'movies/10things_trailer.mp4', 'Aladdin': 'movies/aladdin_trailer.mp4',
-              'Dark Knight': 'movies/dark_knight.mp4', 'Inception': 'movies/inception.mp4',
-              'Lord Of The Rings': 'movies/rings.mp4', 'Merlin': 'movies/merlin.mp4',
-              'Never Ending Story': 'movies/never_ending.mp4', "Singin' In The Rain": 'movies/rain.mp4',
-              'Star Wars': 'movies/star_wars.mp4', 'Superman 1978': 'movies/superman1978.mp4',
-              'Superman 2025': 'movies/superman2025.mp4', 'The Batman': 'movies/the_batman.mp4',
-              'The Flash': 'movies/the_flash.mp4'}
-MOVIE_START_PATH = 'movies/'
+MOVIE_START_PATH = 'movies'
 
 
 def handle_err(client_socket):
@@ -39,6 +32,31 @@ def handle_err(client_socket):
     :return:
     """
     client_socket.close()
+
+
+def get_all_file_paths(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        print(f"Directory {directory} created.")
+
+    file_paths = []
+    for filename in os.listdir(directory):
+        full_path = os.path.join(directory, filename)
+        if os.path.isfile(full_path):
+            file_paths.append(full_path)
+    return file_paths
+
+
+def initialize_db(db_name, info_dir):
+    paths_lst = get_all_file_paths(info_dir)
+    path_dict = {}
+    for path in paths_lst:
+        name = path.replace("_", " ")
+        name = name.split('.')[0]
+        name = name.split("\\")[1]
+        path_dict[name] = path
+    new_db = AdvDB(True, db_name, path_dict)
+    return new_db
 
 
 def get_video_duration(movie_path, chunk_duration=10):
@@ -233,7 +251,7 @@ def file_break(movie_path, client_socket, client_aes, admin_socket, admin_aes, p
                 print("Error sending stop message to admin: " + str(e))
 
 
-def get_file(admin_sock, admin_aes, movie_name):
+def get_file(admin_sock, admin_aes, movie_name, movie_db):
     print('key:')
     print(admin_aes.get_key())
     # Get the file length (FL) message
@@ -284,8 +302,7 @@ def get_file(admin_sock, admin_aes, movie_name):
         print(f"Contents of chunks.txt:\n{open(chunks_txt_path).read()}")
 
         # Output path for the final movie
-        output_path = os.path.join("movies", f"{movie_name}.mp4").replace("\\", "/")
-
+        output_path = os.path.abspath(os.path.join("movies", f"{movie_name}.mp4"))
         # FFmpeg command (run inside the temp directory)
         ffmpeg_cmd = [
             "ffmpeg", "-f", "concat", "-safe", "0",
@@ -298,6 +315,7 @@ def get_file(admin_sock, admin_aes, movie_name):
 
         try:
             subprocess.run(ffmpeg_cmd, cwd=tmpdir, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            movie_db.set_val(movie_name, output_path)
             print(f"Movie saved to {output_path}")
         except subprocess.CalledProcessError as e:
             print("FFmpeg failed:")
@@ -315,7 +333,7 @@ def wait(admin_sock, admin_aes, movie_db):
             os.remove(movie_fpath)
             movie_db.delete_data(flashpoint_protocol.get_data(rm_msg).decode())
     elif func == 'FN':
-        get_file(admin_sock, admin_aes, flashpoint_protocol.get_data(rm_msg).decode())
+        get_file(admin_sock, admin_aes, flashpoint_protocol.get_data(rm_msg).decode(), movie_db)
 
 
 def run_wait(admin_sock, admin_aes, movie_db):
@@ -440,7 +458,7 @@ def main():
     admin_aes = start_encryption(admin_sock)
 
     # setting a database for the movie files locations
-    db = AdvDB(True, 'movie', MOVIE_DICT)
+    db = initialize_db('movie', MOVIE_START_PATH)
 
     run_wait(admin_sock, admin_aes, db)
 
