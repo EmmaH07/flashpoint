@@ -23,6 +23,7 @@ POSTER_DICT = {'10 Things I Hate About You': 'posters/10things_trailer.png', 'Al
                'Star Wars': 'posters/star_wars.png', 'Superman 1978': 'posters/superman1978.png',
                'Superman 2025': 'posters/superman2025.png', 'The Batman': 'posters/the_batman.png',
                'The Flash': 'posters/the_flash.png'}
+POSTER_DIR = 'posters'
 
 # setting global lock variable
 write_lock = threading.Lock()
@@ -30,6 +31,31 @@ read_lock = threading.Lock()
 
 # keeping track of media servers sockets
 media_sockets = []
+
+
+def get_all_file_paths(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        print(f"Directory {directory} created.")
+
+    file_paths = []
+    for filename in os.listdir(directory):
+        full_path = os.path.join(directory, filename)
+        if os.path.isfile(full_path):
+            file_paths.append(full_path)
+    return file_paths
+
+
+def initialize_db(db_name, info_dir):
+    paths_lst = get_all_file_paths(info_dir)
+    path_dict = {}
+    for path in paths_lst:
+        name = path.replace("_", " ")
+        name = name.split('.')[0]
+        name = name.split("\\")[1]
+        path_dict[name] = path
+    new_db = AdvDB(True, db_name, path_dict)
+    return new_db
 
 
 def login(login_msg, db):
@@ -129,6 +155,27 @@ def image2bytes(image_fpath):
     return image_bytes
 
 
+def save_png_bytes(image_bytes, movie_name):
+    """
+    Save raw PNG image bytes to a file.
+    :param image_bytes: PNG image data in bytes
+    :param movie_name: full path where to save the image (including filename.png)
+    """
+    # Make sure the directory exists (optional if you're sure it already exists)
+    new_name = movie_name
+    if " " in new_name:
+        new_name = new_name.replace(" ", "_")
+    img_path = os.path.join(POSTER_DIR, f"{movie_name}.png")
+
+    with open(img_path, 'wb') as f:
+        f.write(image_bytes)
+        f.flush()
+        os.fsync(f.fileno())  # Ensures data is written to disk
+
+    print(f"Image saved to {img_path}")
+    return img_path
+
+
 def broadcast(func, data):
     d = flashpoint_protocol.create_proto_data(data)
     for sock in media_sockets:
@@ -151,16 +198,21 @@ def get_file(client_socket, aes_obj):
         broadcast('FC', chunk)
 
 
-def run_get_file(client_socket, aes_obj):
-    len_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
-    print(len_msg)
-    file_len = flashpoint_protocol.get_data(len_msg)
-    broadcast('FL', file_len)
-    for i in range(int(file_len.decode())):
-        chunk_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
-        chunk = flashpoint_protocol.get_data(chunk_msg)
-        print(flashpoint_protocol.get_func(chunk_msg))
-        broadcast('FC', chunk)
+def run_get_file(client_socket, aes_obj, movie_name, poster_db):
+    img_message = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+    if flashpoint_protocol.get_func(img_message) == 'FI':
+        p_path = save_png_bytes(flashpoint_protocol.get_data(img_message), movie_name.decode())
+        poster_db.set_val(movie_name, p_path)
+
+        len_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+        print(len_msg)
+        file_len = flashpoint_protocol.get_data(len_msg)
+        broadcast('FL', file_len)
+        for i in range(int(file_len.decode())):
+            chunk_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+            chunk = flashpoint_protocol.get_data(chunk_msg)
+            print(flashpoint_protocol.get_func(chunk_msg))
+            broadcast('FC', chunk)
 
 
 def handle_thread(client_socket, client_address, poster_db, socket_db):
@@ -323,12 +375,15 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
         if func == 'RM':
             movie_name = flashpoint_protocol.get_data(ret_msg)
             broadcast('RM', movie_name)
+            poster_fpath = poster_db.get_val[movie_name.decode()]
+            if os.path.exists(poster_fpath):
+                os.remove(poster_fpath)
             poster_db.delete_data(movie_name.decode())
 
         if func == 'FN':
             movie_name = flashpoint_protocol.get_data(ret_msg)
             broadcast('FN', movie_name)
-            run_get_file(client_socket, aes_obj)
+            run_get_file(client_socket, aes_obj, movie_name, poster_db)
 
         if func == 'DS':
             # client disconnected
@@ -341,7 +396,7 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
 
 def main():
     # creating databases to hold the poster file paths and the socket info.
-    poster_db = AdvDB(True, 'poster', POSTER_DICT)
+    poster_db = initialize_db('poster', POSTER_DIR)
     socket_db = AdvDB(True, 'sockets')
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
