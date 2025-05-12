@@ -2,7 +2,7 @@ import struct
 import base64
 
 LEGAL_FUNCS = ['LI', 'SU', 'AP', 'GM', 'DS', 'MR', 'CR', 'PM', 'LL', 'VU', 'IE', 'YM', 'PL', 'SA', 'MC', 'SD', 'UD',
-               'ML', 'DC', 'AK', 'PK', 'IA', 'VA', 'RM', 'FL', 'FC', 'FN']
+               'ML', 'DC', 'AK', 'PK', 'IA', 'VA', 'RM', 'FL', 'FC', 'FN', 'FI']
 
 
 def get_func(byte_msg):
