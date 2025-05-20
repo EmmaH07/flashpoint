@@ -17,14 +17,6 @@ class DBConnection:
         except Exception as e:
             print(f"General Exception: {e}")
 
-    def movie_exists(self, movie_name):
-        print('1')
-        my_cursor = self.__db.cursor()
-        my_cursor.execute('SELECT movie_name FROM movies WHERE movie_name = %s', (movie_name,))
-        movie = my_cursor.fetchone()
-        my_cursor.close()
-        return movie is not None
-
     def fetch_movie(self, movie_name):
         print('2')
         my_cursor = self.__db.cursor()
@@ -60,7 +52,8 @@ class DBConnection:
         finally:
             cursor.close()
 
-    def get_movie_lst(self, user_id):
+    @staticmethod
+    def get_movie_lst(user_id):
         try:
             conn = pymysql.connect(
                 host='127.0.0.1',
@@ -151,6 +144,13 @@ class DBConnection:
         if is_admin == 1:
             res = True
         return res
+
+    def remove_movie(self, movie_name):
+        cursor = self.__db.cursor()
+        sql = 'DELETE FROM seen_movies WHERE movie_name = %s'
+        cursor.execute(sql, args=(movie_name, ))
+        self.__db.commit()
+        cursor.close()
 
 
 if __name__ == '__main__':
