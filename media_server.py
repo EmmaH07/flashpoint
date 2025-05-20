@@ -302,7 +302,10 @@ def get_file(admin_sock, admin_aes, movie_name, movie_db):
         print(f"Contents of chunks.txt:\n{open(chunks_txt_path).read()}")
 
         # Output path for the final movie
-        output_path = os.path.abspath(os.path.join("movies", f"{movie_name}.mp4"))
+        new_name = movie_name
+        if " " in movie_name:
+            new_name = new_name.replace(" ", "_")
+        output_path = os.path.abspath(os.path.join("movies", f"{new_name}.mp4"))
         # FFmpeg command (run inside the temp directory)
         ffmpeg_cmd = [
             "ffmpeg", "-f", "concat", "-safe", "0",
