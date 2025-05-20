@@ -10,7 +10,6 @@ import logging
 from adv_db import AdvDB
 from rsa import RsaEncryption
 from aes import AesEncryption
-from queue import Queue
 
 FIRST_FUNCS = ['SU', 'LI', 'SD']
 IP = '0.0.0.0'
@@ -165,7 +164,8 @@ def save_png_bytes(image_bytes, movie_name):
     new_name = movie_name
     if " " in new_name:
         new_name = new_name.replace(" ", "_")
-    img_path = os.path.join(POSTER_DIR, f"{movie_name}.png")
+    print(new_name)
+    img_path = os.path.join(POSTER_DIR, f"{new_name}.png")
 
     with open(img_path, 'wb') as f:
         f.write(image_bytes)
@@ -202,8 +202,9 @@ def run_get_file(client_socket, aes_obj, movie_name, poster_db):
     img_message = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
     if flashpoint_protocol.get_func(img_message) == 'FI':
         p_path = save_png_bytes(flashpoint_protocol.get_data(img_message), movie_name.decode())
-        poster_db.set_val(movie_name, p_path)
-
+        poster_db.set_val(movie_name.decode(), p_path)
+        print("set val: " + poster_db.get_val(movie_name.decode()))
+        print(movie_name)
         len_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
         print(len_msg)
         file_len = flashpoint_protocol.get_data(len_msg)
@@ -375,15 +376,27 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
         if func == 'RM':
             movie_name = flashpoint_protocol.get_data(ret_msg)
             broadcast('RM', movie_name)
-            poster_fpath = poster_db.get_val[movie_name.decode()]
+            poster_fpath = poster_db.get_val(movie_name.decode())
             if os.path.exists(poster_fpath):
                 os.remove(poster_fpath)
             poster_db.delete_data(movie_name.decode())
+            db.remove_movie(movie_name.decode())
 
         if func == 'FN':
             movie_name = flashpoint_protocol.get_data(ret_msg)
             broadcast('FN', movie_name)
             run_get_file(client_socket, aes_obj, movie_name, poster_db)
+
+        if func == 'ME':
+            exists = poster_db.get_val(flashpoint_protocol.get_data(ret_msg).decode())
+            if exists:
+                data = flashpoint_protocol.create_proto_data('True'.encode())
+                msg = flashpoint_protocol.create_aes_msg('VM', data, aes_obj)
+                client_socket.send(msg)
+            else:
+                data = flashpoint_protocol.create_proto_data('False'.encode())
+                msg = flashpoint_protocol.create_aes_msg('VM', data, aes_obj)
+                client_socket.send(msg)
 
         if func == 'DS':
             # client disconnected
@@ -397,6 +410,7 @@ def handle_thread(client_socket, client_address, poster_db, socket_db):
 def main():
     # creating databases to hold the poster file paths and the socket info.
     poster_db = initialize_db('poster', POSTER_DIR)
+    print(poster_db.get_dict())
     socket_db = AdvDB(True, 'sockets')
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
