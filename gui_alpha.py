@@ -20,6 +20,7 @@ from PIL import ImageFile
 import flashpoint_protocol
 from rsa import RsaEncryption
 from aes import AesEncryption
+from gui_screen import GuiScreen
 
 IP = '127.0.0.1'
 PORT = 3600
@@ -61,6 +62,15 @@ def start_encryption(client_socket):
     logging.debug(f"sent AK to admin")
 
     return aes_obj
+
+
+def movie_exists(client_socket, aes_obj, movie_name):
+    data = flashpoint_protocol.create_proto_data(movie_name.encode())
+    msg = flashpoint_protocol.create_aes_msg('ME', data, aes_obj)
+    client_socket.send(msg)
+    ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+    ans = flashpoint_protocol.get_data(ret_msg)
+    return ans.decode()
 
 
 def check_user_qualifications(username, password):
@@ -313,7 +323,16 @@ def byte2img(b_img):
     return img
 
 
-def recv_img_lst(client_socket, aes_obj, username, password):
+def run_recv_img_lst(client_socket, aes_obj, username, password, win_obj):
+    thread = threading.Thread(
+        target=recv_img_lst,
+        args=(client_socket, aes_obj, username, password, win_obj),
+        daemon=True  # dies when the main program exits
+    )
+    thread.start()
+
+
+def recv_img_lst(client_socket, aes_obj, username, password, win_obj):
     """
     the func receives all the library posters
     :param client_socket: the client's socket
@@ -323,10 +342,13 @@ def recv_img_lst(client_socket, aes_obj, username, password):
     :type username: str
     :param password: the user's password in HASH
     :type password: str
+    :param win_obj:
     :return: the full poster list
     """
     global poster_lst
-    poster_lst = []
+    win_obj.reset_poster_lst()
+    poster_lst = win_obj.get_poster_lst()
+    win_obj.disable_close()
 
     # sending an 'All Posters' request
     msg = flashpoint_protocol.create_aes_msg('AP', flashpoint_protocol.create_proto_data(), aes_obj)
@@ -356,14 +378,13 @@ def recv_img_lst(client_socket, aes_obj, username, password):
                 img = byte2img(img)
 
                 if img:
-                    poster_lst.append((flashpoint_protocol.get_data(img_msg).decode(), img))
+                    win_obj.add_poster(flashpoint_protocol.get_data(img_msg).decode(), img)
                     if i >= 7:
                         lib_frame.forget()
-                        display_library(client_socket, aes_obj, username, password)
+                        display_library(client_socket, aes_obj, username, password, win_obj)
                         lib_frame.pack()
                 wait_txt_label.destroy()
                 lib_frame.update_idletasks()
-                library_screen(client_socket, aes_obj, username, password)
             else:
                 # in case of an error message, displaying error screen
                 logging.debug(f"got ER from admin while waiting for posters")
@@ -373,10 +394,23 @@ def recv_img_lst(client_socket, aes_obj, username, password):
         logging.debug(f"got ER from admin while waiting for posters")
         create_err_pg()
 
+    win_obj.enable_close()
+    win_obj.enable_all_buttons()
+    poster_lst = win_obj.get_poster_lst()
+
     return poster_lst
 
 
-def get_paused_movies(username, password, client_socket, aes_obj):
+def run_get_paused_movies(client_socket, aes_obj, win_obj, username, password):
+    thread = threading.Thread(
+        target=get_paused_movies,
+        args=(client_socket, aes_obj, win_obj, username, password),
+        daemon=True  # dies when the main program exits
+    )
+    thread.start()
+
+
+def get_paused_movies(client_socket, aes_obj, win_obj, username, password):
     """
     the func receives all the library posters
     :param username: the user's username
@@ -389,7 +423,8 @@ def get_paused_movies(username, password, client_socket, aes_obj):
     :return: alist of the client's paused movies
     """
     global hposter_lst, empty
-    hposter_lst = []
+    win_obj.reset_home_posters()
+    hposter_lst = win_obj.get_home_posters()
     # sending a 'Get Movies' request
     msg = flashpoint_protocol.create_aes_msg('GM', flashpoint_protocol.create_proto_data(username.encode(),
                                                                                          password.encode()), aes_obj)
@@ -403,6 +438,8 @@ def get_paused_movies(username, password, client_socket, aes_obj):
         lst_len = int(flashpoint_protocol.get_data(ret_msg).decode())
         if lst_len == 0:
             empty = True
+
+        win_obj.disable_all_buttons()
 
         for i in range(lst_len):
             # displaying loading text
@@ -423,8 +460,8 @@ def get_paused_movies(username, password, client_socket, aes_obj):
                 m_poster = byte2img(m_poster)
 
                 home_pg_frame.forget()
-                hposter_lst.append((m_name, m_frame, m_poster))
-                display_movies(client_socket, aes_obj, username, password)
+                win_obj.add_home_poster(m_name, m_frame, m_poster)
+                display_movies(client_socket, aes_obj, username, password, win_obj)
                 home_pg_frame.pack()
                 home_pg_frame.update_idletasks()
                 wait_txt_label.destroy()
@@ -434,6 +471,8 @@ def get_paused_movies(username, password, client_socket, aes_obj):
                 logging.debug(f"got ER from admin while waiting for posters")
                 create_err_pg()
 
+        win_obj.enable_all_buttons()
+        hposter_lst = win_obj.get_home_posters()
         home_screen(client_socket, aes_obj, username, password)
 
     else:
@@ -444,7 +483,7 @@ def get_paused_movies(username, password, client_socket, aes_obj):
     return hposter_lst
 
 
-def display_movies(client_socket, aes_obj, username, password, counter=0):
+def display_movies(client_socket, aes_obj, username, password, win_obj, counter=0):
     """
     The func displays the client's paused movies
     :param client_socket: the client's socket
@@ -454,6 +493,7 @@ def display_movies(client_socket, aes_obj, username, password, counter=0):
     :type username: str
     :param password: the user's password in HASH
     :type password: str
+    :param win_obj:
     :param counter: the index of the last displayed movie
     :type counter: int
     :return: the updated counter
@@ -464,6 +504,7 @@ def display_movies(client_socket, aes_obj, username, password, counter=0):
     title_buttons = []
     label_lst = []
     poster_img_refs = []
+    hposter_lst = win_obj.get_home_posters()
 
     for i in range(0, 4):
         x = [X1, X2, X3, X4][i % 4]
@@ -488,17 +529,20 @@ def display_movies(client_socket, aes_obj, username, password, counter=0):
                                   font=("Arial Narrow", 11))
             movie_button.place(x=x, y=HOME_Y + POSTER_HEIGHT + 5)
             title_buttons.append(movie_button)
+            win_obj.add_button(movie_button)
+            win_obj.disable_all_buttons()
 
         # displaying the movie posters
-        p_lib_label = Label(home_pg_frame, image=m_img, background='#262626')
-        p_lib_label.place(x=x, y=HOME_Y)
-        label_lst.append(p_lib_label)
+        img_label = Label(home_pg_frame, image=m_img, background='#262626')
+        img_label.place(x=x, y=HOME_Y)
+        label_lst.append(img_label)
         poster_img_refs.append(m_img)
 
+    win_obj.enable_all_buttons()
     return counter
 
 
-def display_library(client_socket, aes_obj, username, password, counter=0):
+def display_library(client_socket, aes_obj, username, password, win_obj, counter=0):
     """
     the func displays the library posters
     :param client_socket: the client's socket
@@ -518,6 +562,7 @@ def display_library(client_socket, aes_obj, username, password, counter=0):
     title_buttons = []
     label_lst = []
     poster_img_refs = []
+    poster_lst = win_obj.get_poster_lst()
 
     for i in range(0, 8):
         y = LIB_Y1
@@ -545,12 +590,15 @@ def display_library(client_socket, aes_obj, username, password, counter=0):
                                   font=("Arial Narrow", 11))
             movie_button.place(x=x, y=y + POSTER_HEIGHT + 5)
             title_buttons.append(movie_button)
+            win_obj.add_button(movie_button)
+            win_obj.disable_all_buttons()
 
-        # displaying the movie posters
-        p_lib_label = Label(lib_frame, image=m_img, background='#262626')
-        p_lib_label.place(x=x, y=y)
-        label_lst.append(p_lib_label)
-        poster_img_refs.append(m_img)
+            # displaying the movie posters
+            img_label = Label(lib_frame, image=m_img, background='#262626')
+            img_label.place(x=x, y=y)
+            label_lst.append(img_label)
+            poster_img_refs.append(m_img)
+            win_obj.add_img_label(m_img, '#262626', x, y)
 
     return counter
 
@@ -823,7 +871,17 @@ def image2bytes(image_fpath):
     return image_bytes
 
 
-def send_file(client_socket, aes_obj, file_path, img_path, movie_name):
+def send_file(client_socket, aes_obj, file_path, img_path, movie_name, win_obj):
+    # show loading label
+    load_label = win_obj.add_label("Sending Movie Info To Database, Please Don't Close This Window", 70, 150, 15,
+                                   'white', '#262626')
+
+    # disabling buttons
+    win_obj.disable_all_buttons()
+
+    # disable close window button
+    win_obj.disable_close()
+
     # Send movie name
     data = flashpoint_protocol.create_proto_data(movie_name.encode())
     msg = flashpoint_protocol.create_aes_msg('FN', data, aes_obj)
@@ -833,7 +891,7 @@ def send_file(client_socket, aes_obj, file_path, img_path, movie_name):
     # send movie poster
     img_bytes = image2bytes(img_path)
     data = flashpoint_protocol.create_proto_data(img_bytes)
-    msg = flashpoint_protocol.create_aes_msg('FI',data, aes_obj)
+    msg = flashpoint_protocol.create_aes_msg('FI', data, aes_obj)
     client_socket.send(msg)
     print(f"Sending file: {file_path}")
 
@@ -886,7 +944,22 @@ def send_file(client_socket, aes_obj, file_path, img_path, movie_name):
                     logging.debug(f'Sent chunk {i} to server')
             except (BrokenPipeError, ConnectionResetError) as e:
                 print(f"Client disconnected while sending chunk {i}: {e}")
+                win_obj.remove_label(load_label)
+                err_label = win_obj.add_label("An Error Accrued While Sending Movie To Database", 215, 150, 15, 'white',
+                                              '#262626')
+                win_obj.remove_label(err_label, 3000)
+                win_obj.enable_close()
                 break
+        win_obj.remove_label(load_label)
+        ok_label = win_obj.add_label("Movie Was Sent Successfully", 215, 150, 15, 'white', '#262626')
+
+        # enable closing the window
+        win_obj.enable_close()
+
+        # enable buttons
+        win_obj.enable_all_buttons()
+
+        win_obj.remove_label(ok_label, 3000)
 
 
 def browse_file():
@@ -898,21 +971,47 @@ def browse_file():
         selected_path.set(path)
 
 
-def file_submit(client_socket, aes_obj):
+def file_submit(client_socket, aes_obj, win_obj):
     file_path = selected_path.get()
     img_path = image_path.get()
     movie_name = name_box.get()
-    if file_path and img_path and movie_name:
-        print(f"Submitting {file_path} with poster {img_path} and name {movie_name}")
-        run_send_file(client_socket, aes_obj, file_path, img_path, movie_name)
-    else:
-        print("Missing file or movie name")
+    data = flashpoint_protocol.create_proto_data(movie_name.encode())
+    msg = flashpoint_protocol.create_aes_msg('ME', data, aes_obj)
+    client_socket.send(msg)
+    ret_msg = flashpoint_protocol.get_aes_msg(client_socket, aes_obj)
+    if flashpoint_protocol.get_func(ret_msg) == 'VM':
+        if flashpoint_protocol.get_data(ret_msg) == 'True':
+            err_label = win_obj.add_label('Movie Name Already In Database', 215, 150, 15, 'white',
+                                          '#262626')
+            win_obj.remove_label(err_label, 3000)
+        else:
+            if file_path and img_path and movie_name:
+                print(f"Submitting {file_path} with poster {img_path} and name {movie_name}")
+                run_send_file(client_socket, aes_obj, file_path, img_path, movie_name, win_obj)
+            else:
+                print("Missing file or movie name")
+                if file_path and movie_name:
+                    err_label = win_obj.add_label('Missing Image File', 250, 150, 15, 'white',
+                                                  '#262626')
+                    win_obj.remove_label(err_label, 3000)
+                elif img_path and movie_name:
+                    err_label = win_obj.add_label('Missing Movie File', 250, 150, 15, 'white',
+                                                  '#262626')
+                    win_obj.remove_label(err_label, 3000)
+                elif img_path and file_path:
+                    err_label = win_obj.add_label('Missing Movie Name', 250, 150, 15, 'white',
+                                                  '#262626')
+                    win_obj.remove_label(err_label, 3000)
+                else:
+                    err_label = win_obj.add_label('Missing Details', 270, 150, 15, 'white',
+                                                  '#262626')
+                    win_obj.remove_label(err_label, 3000)
 
 
-def run_send_file(client_socket, aes_obj, file_path, img_path, movie_name):
+def run_send_file(client_socket, aes_obj, file_path, img_path, movie_name, win_obj):
     thread = threading.Thread(
         target=send_file,
-        args=(client_socket, aes_obj, file_path, img_path, movie_name),
+        args=(client_socket, aes_obj, file_path, img_path, movie_name, win_obj),
         daemon=True  # dies when the main program exits
     )
     thread.start()
@@ -941,17 +1040,23 @@ def choose_image():
 
 
 def open_plus_window(client_socket, aes_obj):
-    global name_box, selected_path, file_path_label,image_path_label,image_path
+    global name_box, selected_path, file_path_label, image_path_label, image_path
 
     plus_win = tk.Toplevel(win)
     plus_win.title("Add Movie Window")
-    plus_win.geometry("800x400")
+    plus_win.geometry("711x400")
     plus_win.transient(win)
     plus_win.grab_set()
+    plus_frame = Frame(plus_win, bg='black', height=400, width=711)
+    plus_win_obj = GuiScreen(plus_win, plus_frame)
+
+    # bg label
+    mini_label = Label(plus_frame, image=mini_bg)
+    mini_label.place(x=0, y=0)
 
     # Movie name entry
     name_box = Entry(plus_win)
-    name_box.place(x=120, y=85)
+    name_box.place(x=170, y=85)
     name_box.config(font=('Arial Narrow', 30), fg='#fcba03')
     name_box.insert(0, 'Movie Name')
 
@@ -963,65 +1068,77 @@ def open_plus_window(client_socket, aes_obj):
     browse_button = Button(
         plus_win, text='Choose File',
         command=choose_file,
-        bg="#fcba03", fg="white",
+        bg="#c00000", fg="white",
         font=("Arial Narrow", 16),
         width=11
     )
-    browse_button.place(x=200, y=220)
+    browse_button.place(x=100, y=220)
+    plus_win_obj.add_button(browse_button)
 
     # Label to show the selected file
     file_path_label = Label(
         plus_win, text="No file selected",
         font=("Arial", 10), wraplength=500, justify="left"
     )
-    file_path_label.place(x=200, y=260)
+    file_path_label.place(x=100, y=260)
 
     # Image browse button
     image_button = Button(
         plus_win, text='Choose Image',
         command=choose_image,
-        bg="#03a9fc", fg="white",
+        bg="#c00000", fg="white",
         font=("Arial Narrow", 16),
         width=11
     )
-    image_button.place(x=450, y=220)
+    image_button.place(x=500, y=220)
+    plus_win_obj.add_button(image_button)
 
     # Label to show the selected image path
     image_path_label = Label(
         plus_win, text="No image selected",
         font=("Arial", 10), wraplength=500, justify="left"
     )
-    image_path_label.place(x=450, y=260)
+    image_path_label.place(x=500, y=260)
 
     # Submit button
     submit_button = Button(
         plus_win, text='Submit',
-        command=lambda: file_submit(client_socket, aes_obj),
+        command=lambda: file_submit(client_socket, aes_obj, plus_win_obj),
         activebackground="#bf8e04",
         activeforeground="white",
         bd=3, bg="#fcba03", fg="white",
         font=("Arial Narrow", 18),
         width=11
     )
-    submit_button.place(x=200, y=320)
+    submit_button.place(x=280, y=320)
+    plus_win_obj.add_button(submit_button)
+
+    plus_frame.pack()
 
 
 def open_remove_window(client_socket, aes_obj):
     global movie_name_box
     new_win = tk.Toplevel(win)
     new_win.title("Remove Movie Window")
-    new_win.geometry("800x400")
+    new_win.geometry("711x400")
     new_win.transient(win)  # Keep it on top of the main window
     new_win.grab_set()  # Make it modal (blocks interaction with main)
+    remove_frame = Frame(new_win, bg='black', height=400, width=711)
+    remove_win_obj = GuiScreen(new_win, remove_frame)
 
-    movie_name_box = Entry(new_win)
-    movie_name_box.place(x=120, y=85)
+    # bg label
+    mini_label = Label(remove_frame, image=mini_bg)
+    mini_label.place(x=0, y=0)
+
+    movie_name_box = Entry(remove_frame)
+    movie_name_box.place(x=170, y=85)
     movie_name_box.config(font=('Arial Narrow', 30))
     movie_name_box.insert(0, 'Movie Name')
     movie_name_box.config(fg='#fcba03')
 
     # setting submit button
-    submit_button = Button(new_win, text='Submit', command=lambda: remove_submit(client_socket, aes_obj),
+    submit_button = Button(remove_frame, text='Submit', command=lambda: remove_submit(client_socket, aes_obj,
+                                                                                      remove_win_obj),
                            activebackground="#bf8e04",
                            activeforeground="white",
                            anchor="center",
@@ -1032,16 +1149,36 @@ def open_remove_window(client_socket, aes_obj):
                            fg="white",
                            font=("Arial Narrow", 18),
                            width=11)
-    submit_button.place(x=200, y=150)
+    submit_button.place(x=270, y=200)
+
+    remove_frame.pack()
 
 
-def remove_submit(client_socket, aes_obj):
+def remove_submit(client_socket, aes_obj, win_obj):
+    """
+
+    :param client_socket:
+    :param aes_obj:
+    :param win_obj:
+    :type win_obj: GuiScreen
+    :return:
+    """
     global movie_name_box
     movie_name = movie_name_box.get()
-    data = flashpoint_protocol.create_proto_data(movie_name.encode())
-    msg = flashpoint_protocol.create_aes_msg('RM', data, aes_obj)
-    client_socket.send(msg)
-    logging.debug('sent RM to admin')
+    exists = movie_exists(client_socket, aes_obj, movie_name)
+    print(exists)
+    if exists == 'True':
+        data = flashpoint_protocol.create_proto_data(movie_name.encode())
+        msg = flashpoint_protocol.create_aes_msg('RM', data, aes_obj)
+        client_socket.send(msg)
+        logging.debug('sent RM to admin')
+        ok_label = win_obj.add_label('Removed Movie From Database', 210, 300, 15, 'white',
+                                     '#262626')
+        win_obj.remove_label(ok_label, 3000)
+    else:
+        err_label = win_obj.add_label("Movie Doesn't Exist", 250, 300, 15, 'white',
+                                      '#262626')
+        win_obj.remove_label(err_label, 2000)
 
 
 def wait_for_remove(client_socket, aes_obj):
@@ -1462,6 +1599,9 @@ def create_home_pg(client_socket, aes_obj, username, password, counter=0):
     """
     global home_pg_frame, library_bg, hposter_lst, empty
 
+    # setting frame object
+    home_obj = GuiScreen(win, home_pg_frame, hposter_lst, poster_lst)
+
     # setting the background
     bg_label = Label(home_pg_frame, image=library_bg)
     bg_label.place(x=0, y=0)
@@ -1485,7 +1625,7 @@ def create_home_pg(client_socket, aes_obj, username, password, counter=0):
                          font=("Arial Narrow", 18),
                          width=11)
     change_2lib.place(x=1200, y=10)
-    change_2lib.config(state=DISABLED)
+    home_obj.add_button(change_2lib)
 
     # setting 'change to home screen' button
     change_2home = Button(home_pg_frame, text='Home', command=lambda: home_screen(client_socket, aes_obj, username,
@@ -1516,19 +1656,21 @@ def create_home_pg(client_socket, aes_obj, username, password, counter=0):
                            font=("Arial Narrow", 18),
                            width=11)
     change_2login.place(x=920, y=10)
-    change_2login.config(state=DISABLED)
+    home_obj.add_button(change_2login)
 
     # setting 'next' button
     next_button = Button(home_pg_frame, image=next_img, command=lambda: next_submit(client_socket, aes_obj, username,
                                                                                     password, counter), bg='#262626')
     next_button.place(x=715, y=650)
-    next_button.config(state=DISABLED)
+    home_obj.add_button(next_button)
 
     # setting 'prev' button
     prev_button = Button(home_pg_frame, image=prev_img, command=lambda: prev(client_socket, aes_obj, username, password,
                                                                              counter), bg='#262626')
     prev_button.place(x=600, y=650)
-    prev_button.config(state=DISABLED)
+    home_obj.add_button(prev_button)
+
+    home_obj.disable_all_buttons()
 
     # checking if client already received the list of seen movies
     if not hposter_lst and not empty:
@@ -1540,14 +1682,13 @@ def create_home_pg(client_socket, aes_obj, username, password, counter=0):
         home_pg_frame.update_idletasks()
 
         # getting the list of seen movies
-        hposter_lst = get_paused_movies(username, password, client_socket, aes_obj)
+        run_get_paused_movies(client_socket, aes_obj, home_obj, username, password)
+        hposter_lst = home_obj.get_home_posters()
 
     # displaying the movie posters and updating the counter
-    counter = display_movies(client_socket, aes_obj, username, password, counter)
-    change_2lib.config(state=NORMAL)
-    change_2login.config(state=NORMAL)
-    next_button.config(state=NORMAL)
-    prev_button.config(state=NORMAL)
+    counter = display_movies(client_socket, aes_obj, username, password, home_obj, counter)
+
+    home_obj.enable_all_buttons()
 
     # displaying frame
     home_pg_frame.pack()
@@ -1568,6 +1709,7 @@ def create_lib_pg(client_socket, aes_obj, username, password, counter=0):
     :return:
     """
     global lib_frame, poster_lst
+    lib_obj = GuiScreen(win, lib_frame, hposter_lst, poster_lst)
 
     # setting the background
     bg_label = Label(lib_frame, image=library_bg)
@@ -1603,7 +1745,7 @@ def create_lib_pg(client_socket, aes_obj, username, password, counter=0):
                           font=("Arial Narrow", 18),
                           width=11)
     change_2home.place(x=1060, y=10)
-    change_2home.config(state=DISABLED)
+    lib_obj.add_button(change_2home)
 
     # setting 'change to log-in screen' button
     change_2login = Button(lib_frame, text='Log-out', command=lambda: login_screen(client_socket, aes_obj),
@@ -1618,20 +1760,23 @@ def create_lib_pg(client_socket, aes_obj, username, password, counter=0):
                            font=("Arial Narrow", 18),
                            width=11)
     change_2login.place(x=920, y=10)
-    change_2login.config(state=DISABLED)
+    lib_obj.add_button(change_2login)
 
     # setting 'down' button
     down_button = Button(lib_frame, image=down_img, command=lambda: down(counter, username, password,
                                                                          client_socket, aes_obj), background='#262626')
     down_button.place(x=1300, y=366)
+    lib_obj.add_button(down_button)
 
     # setting 'up' button
     up_button = Button(lib_frame, image=up_img, command=lambda: up(counter, username, password,
                                                                    client_socket, aes_obj), background='#262626')
     up_button.place(x=15, y=366)
+    lib_obj.add_button(up_button)
 
     # checking if the client already has a list of all the library movie posters
     if not poster_lst:
+        lib_obj.disable_all_buttons()
         # setting empty posters while loading
         for i in range(0, 8):
             y = LIB_Y1
@@ -1643,15 +1788,12 @@ def create_lib_pg(client_socket, aes_obj, username, password, counter=0):
         lib_frame.update_idletasks()
 
         # getting the list of all library movies
-        poster_lst = recv_img_lst(client_socket, aes_obj, username, password)
+        run_recv_img_lst(client_socket, aes_obj, username, password, lib_obj)
+        poster_lst = lib_obj.get_poster_lst()
 
     # displaying the movie posters and updating the counter
-    counter = display_library(client_socket, aes_obj, username, password, counter)
-
-    change_2home.config(state=NORMAL)
-    change_2login.config(state=NORMAL)
-    up_button.config(state=NORMAL)
-    down_button.config(state=NORMAL)
+    counter = display_library(client_socket, aes_obj, username, password, lib_obj, counter)
+    lib_obj.enable_all_buttons()
 
     # displaying frame
     lib_frame.pack()
@@ -1695,14 +1837,14 @@ def create_admin_screen(client_socket, aes_obj):
     # setting a button to add a movie
     plus_button = Button(admin_frame, image=plus_img,
                          command=lambda: open_plus_window(client_socket, aes_obj),
-                         activebackground="#7d0101",
-                         activeforeground="#fcba03",
+                         activebackground="#92d050",
+                         activeforeground="#92d050",
                          anchor="center",
                          bd=3,
-                         bg="#c00000",
+                         bg="#92d050",
                          cursor="hand2",
-                         disabledforeground="#fcba03",
-                         fg="#fcba03",
+                         disabledforeground="#92d050",
+                         fg="#92d050",
                          font=("Arial Narrow", 30))
     plus_button.place(x=450, y=300)
 
@@ -1746,6 +1888,7 @@ start_bg = PhotoImage(file='gui_images/start_bg.png')
 library_bg = PhotoImage(file='gui_images/library_bg.png')
 clean_bg = PhotoImage(file='gui_images/clean_bg.png')
 err_bg = PhotoImage(file='gui_images/err_pg.png')
+mini_bg = PhotoImage(file='gui_images/mini_bg.png')
 
 # set default background
 label1 = Label(win, image=clean_bg)
