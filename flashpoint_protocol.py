@@ -2,21 +2,24 @@ import struct
 import base64
 
 LEGAL_FUNCS = ['LI', 'SU', 'AP', 'GM', 'DS', 'MR', 'CR', 'PM', 'LL', 'VU', 'IE', 'YM', 'PL', 'SA', 'MC', 'SD', 'UD',
-               'ML', 'DC', 'AK', 'PK', 'IA', 'VA', 'RM', 'FL', 'FC', 'FN', 'FI', 'VM', 'ME']
+               'ML', 'DC', 'AK', 'PK', 'IA', 'VA', 'RM', 'FL', 'FC', 'FN', 'FI', 'VM', 'ME', 'AD']
 
 
-def get_func(byte_msg):
+def get_func(proto_msg):
     """
     The func returns the 2 letter message func string.
-    :param byte_msg: a message written by protocol
-    :type byte_msg: bytes
+    :param proto_msg: a message written by protocol
+    :type proto_msg: bytes
     :return: the 2 letter command as a string.
     """
-    if isinstance(byte_msg, str):
-        byte_msg = byte_msg.encode()
-    func = byte_msg.split(b'@')[1]
-    func = func.split(b'|')[0].decode()
-    if func not in LEGAL_FUNCS:
+    if isinstance(proto_msg, str):
+        proto_msg = proto_msg.encode()
+    if b'@' in proto_msg:
+        func = proto_msg.split(b'@')[1]
+        func = func.split(b'|')[0].decode()
+        if func not in LEGAL_FUNCS:
+            func = 'ER'
+    else:
         func = 'ER'
     return func
 
@@ -35,17 +38,21 @@ def get_data(proto_msg, half_num=1):
         half_num = 1
     elif half_num > 4:
         half_num = 4
-    ret_data = data.split(b'^')[half_num-1]
-    return base64.b64decode(ret_data)
+    if b'^' in proto_msg:
+        ret_data = data.split(b'^')[half_num-1]
+        ret_data = base64.b64decode(ret_data)
+    else:
+        ret_data = b''
+    return ret_data
 
 
 def get_aes_msg(client_socket, aes_obj):
     """
     the func waits for a message from the socket and receives it using the packed message length.
     :param client_socket: the socket from which the message should come.
-    :param aes_obj:
-    :type aes_obj:
-    :return: the message from the socket.
+    :param aes_obj: an object for AES encryption/decryption
+    :type aes_obj: AesEncryption
+    :return: the decrypted message from the socket.
     """
     packed_len = client_socket.recv(4)
     while len(packed_len) < 4:
@@ -63,14 +70,14 @@ def get_aes_msg(client_socket, aes_obj):
 
 def create_aes_msg(func, data, aes_obj):
     """
-    A func that creates a message by protocol.
+    A func that creates an AES encrypted message by protocol
     :param func: the function's name
     :type func: str
     :param data: the needed data to send
     :type data: bytes
-    :param aes_obj:
-    :type aes_obj:
-    :return: a message in bytes written by protocol
+    :param aes_obj: an object for AES encryption/decryption
+    :type aes_obj: AesEncryption
+    :return: a message in bytes written by protocol and encrypted using the AES object
     """
     msg_str = '@' + func + '|'
     msg_str = msg_str.encode()
@@ -91,6 +98,17 @@ def create_aes_msg(func, data, aes_obj):
 
 
 def create_rsa_msg(func, data, rsa_obj, pub_key=None):
+    """
+    A func that creates an RSA encrypted message by protocol
+    :param func: the function's name
+    :type func: str
+    :param data: the needed data to send
+    :type data: bytes
+    :param rsa_obj: an object for RSA encryption/decryption
+    :type rsa_obj: RsaEncryption
+    :param pub_key: the public key for the RSA encryption
+    :return: a message in bytes written by protocol and encrypted using the RSA object
+    """
     if b'^' not in data:
         data = b'^^^'
 
@@ -110,6 +128,13 @@ def create_rsa_msg(func, data, rsa_obj, pub_key=None):
 
 
 def get_rsa_msg(client_socket, rsa_obj):
+    """
+    the func waits for a message from the socket and receives it using the packed message length.
+    :param client_socket: the socket from which the message should come.
+    :param rsa_obj: an object for RSA encryption/decryption
+    :type rsa_obj: RsaEncryption
+    :return: the decrypted message from the socket.
+    """
     packed_len = client_socket.recv(4)
     while len(packed_len) < 4:
         packed_len += client_socket.recv(4-len(packed_len))
@@ -125,6 +150,14 @@ def get_rsa_msg(client_socket, rsa_obj):
 
 
 def create_proto_msg(func, data):
+    """
+    A func that creates a message by protocol
+    :param func: the function's name
+    :type func: str
+    :param data: the needed data to send
+    :type data: bytes
+    :return: a message in bytes written by protocol
+    """
     if b'^' not in data:
         data = b'^^^'
 
@@ -138,6 +171,11 @@ def create_proto_msg(func, data):
 
 
 def get_proto_msg(client_socket):
+    """
+    the func waits for a message from the socket and receives it using the packed message length.
+    :param client_socket: the socket from which the message should come.
+    :return: the message from the socket.
+    """
     packed_len = client_socket.recv(4)
     while len(packed_len) < 4:
         packed_len += client_socket.recv(4 - len(packed_len))
