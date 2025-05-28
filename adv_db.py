@@ -5,6 +5,15 @@ import multiprocessing
 
 class AdvDB(FileDB):
     def __init__(self, is_it_threads, file_name, dic={}):
+        """
+        a func that builds an ADVdb object
+        :param is_it_threads: a bool that signals whether there is a need of thread locks or multiprocess locks
+        :type is_it_threads: bool
+        :param file_name: the database file name
+        :type file_name: str
+        :param dic: the dictionary to insert into the database file
+        :type dic: dict
+        """
         super().__init__(file_name, dic)
         self.is_it_threads = is_it_threads
         if self.is_it_threads:
@@ -25,11 +34,18 @@ class AdvDB(FileDB):
         self.write_lock.acquire()
         for i in range(10):
             self.read_lock.acquire()
-        b = super().set_val(key, new_val)
-        for i in range(10):
-            self.read_lock.release()
-        self.write_lock.release()
-        return b
+
+        try:
+            return super().set_val(key, new_val)
+
+        except Exception as e:
+            print(f"Error setting value for key '{key}': {e}")
+            return False
+
+        finally:
+            for i in range(10):
+                self.read_lock.release()
+            self.write_lock.release()
 
     def delete_data(self, key):
         """
@@ -40,11 +56,18 @@ class AdvDB(FileDB):
         self.write_lock.acquire()
         for i in range(10):
             self.read_lock.acquire()
-        obj = super().delete_data(key)
-        for i in range(10):
-            self.read_lock.release()
-        self.write_lock.release()
-        return obj
+
+        try:
+            return super().delete_data(key)
+
+        except Exception as e:
+            print(f"Error deleting key '{key}': {e}")
+            return None
+
+        finally:
+            for i in range(10):
+                self.read_lock.release()
+            self.write_lock.release()
 
     def get_val(self, key):
         """
@@ -53,16 +76,29 @@ class AdvDB(FileDB):
         :return: the value of said key. None if the key doesn't exist.
         """
         self.read_lock.acquire()
-        obj = super().get_val(key)
-        self.read_lock.release()
-        return obj
+
+        try:
+            return super().get_val(key)
+
+        except Exception as e:
+            print(f"Error getting value for key '{key}': {e}")
+            return None
+
+        finally:
+            self.read_lock.release()
 
     def get_dict(self):
         """
         uses lock and semaphore for synchronization.
-        :return: the entire dictionary. None if the key doesn't exist.
+        :return: the entire dictionary. None if an error accrued
         """
         self.read_lock.acquire()
-        obj = super().get_dict()
-        self.read_lock.release()
-        return obj
+        try:
+            return super().get_dict()
+
+        except Exception as e:
+            print(f"Error retrieving dictionary: {e}")
+            return None
+
+        finally:
+            self.read_lock.release()
