@@ -1,0 +1,92 @@
+DEBUG:root:got PK message from admin
+DEBUG:root:sent AK to admin
+DEBUG:root:sent LI to admin
+DEBUG:root:got VU from admin
+DEBUG:root:sent IA to admin
+DEBUG:root:got VA from admin
+DEBUG:root:started 'get paused movies' thread
+DEBUG:root:sent GM to admin
+DEBUG:root:got LL from admin
+DEBUG:root:started 'recv img lst' thread
+DEBUG:root:sent AP message to admin
+DEBUG:root:got LL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:got PL from admin
+DEBUG:root:started 'get chunks' thread
+DEBUG:root:sent a CR message to admin server
+DEBUG:root:got SA from admin
+DEBUG:root:Connected to media server.
+DEBUG:root:got PK message from admin
+DEBUG:root:sent AK to admin
+DEBUG:root:sent MR to media server
+DEBUG:root:got ML from admin
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+ERROR:root:Chunk receiving interrupted [Errno 32] Broken pipe
+DEBUG:root:sent PM to media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got DS from media server
+DEBUG:root:Received 'DS' from server
+DEBUG:root:started 'get paused movies' thread
+DEBUG:root:sent GM to admin
+DEBUG:root:got LL from admin
+DEBUG:root:sent LI to admin
+DEBUG:root:got VU from admin
+DEBUG:root:sent IA to admin
+DEBUG:root:got VA from admin
+DEBUG:root:started 'get paused movies' thread
+DEBUG:root:sent GM to admin
+DEBUG:root:got LL from admin
+DEBUG:root:sent SU to admin
+DEBUG:root:got IE from admin
+DEBUG:root:sent SU to admin
+DEBUG:root:got IE from admin
+DEBUG:root:sent LI to admin
+DEBUG:root:got VU from admin
+DEBUG:root:sent IA to admin
+DEBUG:root:got VA from admin
+DEBUG:root:started 'get paused movies' thread
+DEBUG:root:sent GM to admin
+DEBUG:root:got LL from admin
+DEBUG:root:started 'get chunks' thread
+DEBUG:root:sent a CR message to admin server
+DEBUG:root:got SA from admin
+DEBUG:root:Connected to media server.
+DEBUG:root:got PK message from admin
+DEBUG:root:sent AK to admin
+DEBUG:root:sent MR to media server
+DEBUG:root:got ML from admin
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+ERROR:root:Chunk receiving interrupted [Errno 32] Broken pipe
+DEBUG:root:sent PM to media server
+DEBUG:root:got MC from media server
+DEBUG:root:got MC from media server
+DEBUG:root:got DS from media server
+DEBUG:root:Received 'DS' from server
+DEBUG:root:started 'get paused movies' thread
+DEBUG:root:sent GM to admin
+DEBUG:root:got LL from admin
+DEBUG:root:sent DS message to server
