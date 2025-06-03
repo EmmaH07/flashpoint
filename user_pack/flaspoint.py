@@ -96,6 +96,7 @@ def movie_exists(client_socket, aes_obj, movie_name):
     :return: True if the movie exists, False if not.
     """
     ans = ''
+    res = False
     try:
         # sending a ME message
         data = flashpoint_protocol.create_proto_data(movie_name.encode())
@@ -110,6 +111,8 @@ def movie_exists(client_socket, aes_obj, movie_name):
 
         if func == 'VM':
             ans = flashpoint_protocol.get_data(ret_msg).decode()
+            if ans == 'True':
+                res = True
 
         else:
             ans = ''
@@ -119,7 +122,7 @@ def movie_exists(client_socket, aes_obj, movie_name):
         ans = ''
 
     finally:
-        return ans
+        return res
 
 
 def check_user_qualifications(username, password):
@@ -904,7 +907,17 @@ def watch_screen(client_socket, aes_obj, movie_name, username, password, frame=0
 
         # sending a 'Connection Request' message
         try:
-            run_get_chunks(client_socket, aes_obj, movie_name, username, password, change_2home, change_2lib, frame)
+            ans = movie_exists(client_socket, aes_obj, movie_name)
+            if ans:
+                run_get_chunks(client_socket, aes_obj, movie_name, username, password, change_2home, change_2lib, frame)
+            else:
+                err_txt = 'Movie was deleted from library'
+                err_txt_label = Label(watch_frame, text=err_txt, font=('ariel narrow', 15, 'bold'), fg='white',
+                                      bg='#262626')
+                err_txt_label.place(y=700, x=400)
+                err_txt_label.after(3000, err_txt_label.destroy)
+                change_2home.config(state=NORMAL)
+                change_2lib.config(state=NORMAL)
 
         except Exception as e:
             logging.error(f"Failed to connect to media server or during MR/ML exchange: {e}")
@@ -1570,7 +1583,7 @@ def remove_submit(client_socket, aes_obj, win_obj):
         movie_name = movie_name_box.get()
         exists = movie_exists(client_socket, aes_obj, movie_name)
 
-        if exists == 'True':
+        if exists:
             data = flashpoint_protocol.create_proto_data(movie_name.encode())
             msg = flashpoint_protocol.create_aes_msg('RM', data, aes_obj)
             client_socket.send(msg)
