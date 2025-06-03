@@ -1,0 +1,81 @@
+DEBUG:root:('127.0.0.1', 61170): sent PK message to client
+DEBUG:root:('127.0.0.1', 61170): got SD message from client
+DEBUG:root:added 127.0.0.1:35385 to database
+ERROR:root:('127.0.0.1', 61170): error receiving message - [WinError 10054] An existing connection was forcibly closed by the remote host
+DEBUG:root:('127.0.0.1', 61170): connection closed
+DEBUG:root:('127.0.0.1', 61921): sent PK message to client
+DEBUG:root:('127.0.0.1', 61921): got SD message from client
+DEBUG:root:added 127.0.0.1:33670 to database
+DEBUG:root:('127.0.0.1', 63103): sent PK message to client
+DEBUG:root:('127.0.0.1', 63103): got SD message from client
+DEBUG:root:added 127.0.0.1:17013 to database
+ERROR:root:('127.0.0.1', 63103): error receiving message - [WinError 10054] An existing connection was forcibly closed by the remote host
+DEBUG:root:('127.0.0.1', 63103): connection closed
+DEBUG:root:('127.0.0.1', 63297): sent PK message to client
+DEBUG:root:('127.0.0.1', 63297): got SD message from client
+DEBUG:root:added 127.0.0.1:62185 to database
+DEBUG:root:('127.0.0.1', 63372): sent PK message to client
+DEBUG:root:('127.0.0.1', 63372): got DS message from client
+DEBUG:root:('127.0.0.1', 63372): connection closed
+DEBUG:root:('127.0.0.1', 53520): sent PK message to client
+DEBUG:root:('127.0.0.1', 53520): got SD message from client
+DEBUG:root:added 127.0.0.1:60686 to database
+DEBUG:root:('127.0.0.1', 53563): sent PK message to client
+DEBUG:root:('127.0.0.1', 53563): got LI message from client
+DEBUG:root:('127.0.0.1', 53563): sent VU to client
+DEBUG:root:('127.0.0.1', 53563): got IA message from client
+DEBUG:root:('127.0.0.1', 53563): got GM message from client
+DEBUG:root:('127.0.0.1', 53563): sent LL to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): got AP message from client
+DEBUG:root:('127.0.0.1', 53563): sent LL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): sent PL to client
+DEBUG:root:('127.0.0.1', 53563): got CR message from client
+DEBUG:root:('127.0.0.1', 53563): sent SA to client
+DEBUG:root:('127.0.0.1', 53520): got UD message from client
+DEBUG:root:('127.0.0.1', 53520): got DC message from client
+DEBUG:root:('127.0.0.1', 53563): got GM message from client
+DEBUG:root:('127.0.0.1', 53563): sent LL to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): got LI message from client
+DEBUG:root:('127.0.0.1', 53563): sent VU to client
+DEBUG:root:('127.0.0.1', 53563): got IA message from client
+DEBUG:root:('127.0.0.1', 53563): got GM message from client
+DEBUG:root:('127.0.0.1', 53563): sent LL to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): got SU message from client
+DEBUG:root:('127.0.0.1', 53563): sent IE to client
+DEBUG:root:('127.0.0.1', 53563): got SU message from client
+DEBUG:root:added user(('12', 'c4ca4238a0b923820dcc509a6f75849b') to database
+DEBUG:root:('127.0.0.1', 53563): sent IE to client
+DEBUG:root:('127.0.0.1', 53563): got LI message from client
+DEBUG:root:('127.0.0.1', 53563): sent VU to client
+DEBUG:root:('127.0.0.1', 53563): got IA message from client
+DEBUG:root:('127.0.0.1', 53563): got GM message from client
+DEBUG:root:('127.0.0.1', 53563): sent LL to client
+DEBUG:root:('127.0.0.1', 53563): got CR message from client
+DEBUG:root:('127.0.0.1', 53563): sent SA to client
+DEBUG:root:('127.0.0.1', 53520): got UD message from client
+DEBUG:root:('127.0.0.1', 53520): got DC message from client
+DEBUG:root:('127.0.0.1', 53563): got GM message from client
+DEBUG:root:('127.0.0.1', 53563): sent LL to client
+DEBUG:root:('127.0.0.1', 53563): sent YM to client
+DEBUG:root:('127.0.0.1', 53563): got DS message from client
+DEBUG:root:('127.0.0.1', 53563): connection closed
