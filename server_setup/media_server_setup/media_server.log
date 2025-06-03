@@ -1,0 +1,54 @@
+DEBUG:root:Connected to admin server.
+DEBUG:root:Got a message: PK
+DEBUG:root:sent AK message
+DEBUG:root:Started admin handler thread.
+DEBUG:root:Connected to admin server.
+DEBUG:root:Got a message: PK
+DEBUG:root:sent AK message
+DEBUG:root:Started admin handler thread.
+ERROR:root:error while handling 'wait' func: [WinError 10054] An existing connection was forcibly closed by the remote host
+DEBUG:root:Connected to admin server.
+DEBUG:root:Got a message: PK
+DEBUG:root:sent AK message
+DEBUG:root:Started admin handler thread.
+DEBUG:root:Connected to admin server.
+DEBUG:root:Got a message: PK
+DEBUG:root:sent AK message
+DEBUG:root:Started admin handler thread.
+ERROR:root:error while handling 'wait' func: [WinError 10054] An existing connection was forcibly closed by the remote host
+DEBUG:root:Connected to admin server.
+DEBUG:root:Got a message: PK
+DEBUG:root:sent AK message
+DEBUG:root:Started admin handler thread.
+DEBUG:root:Got a message from client: MR
+DEBUG:root:Sent to client: ML
+DEBUG:root:Sent chunk 0 to client
+DEBUG:root:Sent chunk 1 to client
+DEBUG:root:Sent chunk 2 to client
+DEBUG:root:Sent chunk 3 to client
+DEBUG:root:Sent chunk 4 to client
+DEBUG:root:Sent chunk 5 to client
+DEBUG:root:Sent chunk 6 to client
+DEBUG:root:Sent chunk 7 to client
+DEBUG:root:Sent chunk 8 to client
+DEBUG:root:Sent chunk 9 to client
+DEBUG:root:Sent chunk 10 to client
+DEBUG:root:Got message from client: PM
+DEBUG:root:Sent message to admin: UD
+DEBUG:root:Sent message to client: DS
+DEBUG:root:Sent message to admin: DC
+DEBUG:root:Got a message from client: MR
+DEBUG:root:Sent to client: ML
+DEBUG:root:Sent chunk 0 to client
+DEBUG:root:Sent chunk 1 to client
+DEBUG:root:Sent chunk 2 to client
+DEBUG:root:Sent chunk 3 to client
+DEBUG:root:Sent chunk 4 to client
+DEBUG:root:Sent chunk 5 to client
+DEBUG:root:Sent chunk 6 to client
+DEBUG:root:Sent chunk 7 to client
+DEBUG:root:Got message from client: PM
+DEBUG:root:Sent message to admin: UD
+DEBUG:root:Sent message to client: DS
+DEBUG:root:Sent message to admin: DC
+ERROR:root:error while handling 'wait' func: [WinError 10054] An existing connection was forcibly closed by the remote host
