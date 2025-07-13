@@ -209,7 +209,7 @@ def file_break(movie_path, client_socket, client_aes, admin_socket, admin_aes, p
                                     # informing the admin server that the client disconnected
                                     msg = flashpoint_protocol.create_aes_msg('DC',
                                                                              flashpoint_protocol.create_proto_data(
-                                                                                 ADMIN_IP.encode(), str(port).encode()),
+                                                                                 MY_IP.encode(), str(port).encode()),
                                                                              admin_aes)
                                     admin_socket.send(msg)
                                     logging.debug('Sent message to admin: DC')
@@ -286,7 +286,7 @@ def file_break(movie_path, client_socket, client_aes, admin_socket, admin_aes, p
                         # informing the admin server that the client disconnected
                         msg = flashpoint_protocol.create_aes_msg('DC',
                                                                  flashpoint_protocol.create_proto_data(
-                                                                     ADMIN_IP.encode(), str(port).encode()),
+                                                                     MY_IP.encode(), str(port).encode()),
                                                                  admin_aes)
                         admin_socket.send(msg)
                         logging.debug('Sent message to admin: DC')
